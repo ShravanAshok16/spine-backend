@@ -1,0 +1,11 @@
+G:\.NetProject\Spine\Spine.Core\bin\Debug\net10.0\Spine.Core.deps.json
+G:\.NetProject\Spine\Spine.Core\bin\Debug\net10.0\Spine.Core.dll
+G:\.NetProject\Spine\Spine.Core\bin\Debug\net10.0\Spine.Core.pdb
+G:\.NetProject\Spine\Spine.Core\obj\Debug\net10.0\Spine.Core.GeneratedMSBuildEditorConfig.editorconfig
+G:\.NetProject\Spine\Spine.Core\obj\Debug\net10.0\Spine.Core.AssemblyInfoInputs.cache
+G:\.NetProject\Spine\Spine.Core\obj\Debug\net10.0\Spine.Core.AssemblyInfo.cs
+G:\.NetProject\Spine\Spine.Core\obj\Debug\net10.0\Spine.Core.csproj.CoreCompileInputs.cache
+G:\.NetProject\Spine\Spine.Core\obj\Debug\net10.0\Spine.Core.dll
+G:\.NetProject\Spine\Spine.Core\obj\Debug\net10.0\refint\Spine.Core.dll
+G:\.NetProject\Spine\Spine.Core\obj\Debug\net10.0\Spine.Core.pdb
+G:\.NetProject\Spine\Spine.Core\obj\Debug\net10.0\ref\Spine.Core.dll

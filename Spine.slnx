@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Spine.Api/Spine.Api.csproj" />
+  <Project Path="Spine.Core/Spine.Core.csproj" />
+  <Project Path="Spine.Infrastructure/Spine.Infrastructure.csproj" />
+  <Project Path="Spine.Tests/Spine.Tests.csproj" />
+</Solution>
