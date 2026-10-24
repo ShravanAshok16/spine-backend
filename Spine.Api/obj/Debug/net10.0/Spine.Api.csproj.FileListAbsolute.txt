@@ -176,3 +176,4 @@ G:\.NetProject\Spine\Spine.Api\obj\Debug\net10.0\refint\Spine.Api.dll
 G:\.NetProject\Spine\Spine.Api\obj\Debug\net10.0\Spine.Api.pdb
 G:\.NetProject\Spine\Spine.Api\obj\Debug\net10.0\Spine.Api.genruntimeconfig.cache
 G:\.NetProject\Spine\Spine.Api\obj\Debug\net10.0\ref\Spine.Api.dll
+G:\.NetProject\Spine\Spine.Api\obj\Debug\net10.0\Spine.Api.sourcelink.json

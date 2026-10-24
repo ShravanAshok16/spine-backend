@@ -28,8 +28,11 @@ namespace Spine.Infrastructure.Data
                 e.HasIndex(x => x.Email).IsUnique();
                 e.Property(x => x.Email).HasMaxLength(256).IsRequired();
                 e.Property(x => x.DisplayName).HasMaxLength(100);
+                e.Property(x => x.FirstName).HasMaxLength(100);
+                e.Property(x => x.LastName).HasMaxLength(100);
+                e.Property(x => x.PhoneNumber).HasMaxLength(20);
             });
-
+            
             // 2. Book
             modelBuilder.Entity<Book>(e =>
             {

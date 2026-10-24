@@ -15,3 +15,4 @@ G:\.NetProject\Spine\Spine.Infrastructure\obj\Debug\net10.0\refint\Spine.Infrast
 G:\.NetProject\Spine\Spine.Infrastructure\obj\Debug\net10.0\Spine.Infrastructure.pdb
 G:\.NetProject\Spine\Spine.Infrastructure\obj\Debug\net10.0\Spine.Infrastructure.genruntimeconfig.cache
 G:\.NetProject\Spine\Spine.Infrastructure\obj\Debug\net10.0\ref\Spine.Infrastructure.dll
+G:\.NetProject\Spine\Spine.Infrastructure\obj\Debug\net10.0\Spine.Infrastructure.sourcelink.json

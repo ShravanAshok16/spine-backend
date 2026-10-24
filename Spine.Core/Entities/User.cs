@@ -5,9 +5,13 @@ public class User
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Email { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
     
-    // "Public", "FriendsOnly", "Private"
+    // New fields
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+    public string? PhoneNumber { get; set; }
+
+    public string DisplayName { get; set; } = string.Empty;
     public string PrivacySetting { get; set; } = "FriendsOnly"; 
     
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
