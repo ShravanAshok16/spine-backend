@@ -48,43 +48,6 @@ The database is designed using a **Global Catalog** pattern to prevent duplicati
 
 ---
 
-## 🏗️ Project Structure
-
-```text
-Spine/
-├── Spine.Api/                  # HTTP endpoints, controllers, DTOs, Services
-│   ├── Controllers/
-│   ├── Models/
-│   ├── Services/               # TokenService, KafkaProducerService
-│   ├── Events/                 # Event DTOs (PasswordResetRequestedEvent)
-│   ├── Validators/
-│   ├── Middleware/
-│   └── Program.cs
-├── Spine.Core/                 # Domain entities (no external dependencies)
-│   └── Entities/
-│       ├── User.cs
-│       ├── Book.cs
-│       ├── Series.cs
-│       ├── UserBook.cs
-│       ├── Tag.cs
-│       ├── Review.cs
-│       ├── Friendship.cs
-│       ├── Activity.cs
-│       └── PasswordResetToken.cs
-├── Spine.Infrastructure/       # EF Core, DbContext, Migrations
-│   ├── Data/
-│   │   └── AppDbContext.cs
-│   └── Migrations/
-├── Spine.Worker/               # Background service (Kafka Consumer)
-│   └── Worker.cs
-├── Spine.Tests/                # Unit & Integration tests
-│   ├── Integration/
-│   └── Unit/
-├── docker-compose.yml          # Local Kafka & Kafka-UI setup
-└── README.md
-
----
-
 ## 🚀 Setup
 
 ### Prerequisites
@@ -121,3 +84,41 @@ dotnet run --project Spine.Worker
 # Run Automated Tests
 dotnet test
 
+---
+
+## 🏗️ Project Structure
+
+```text
+Spine/
+├── Spine.Api/                  # HTTP endpoints, controllers, DTOs, Services
+│   ├── Controllers/
+│   ├── Models/
+│   ├── Services/               # TokenService, KafkaProducerService
+│   ├── Events/                 # Event DTOs (PasswordResetRequestedEvent)
+│   ├── Validators/
+│   ├── Middleware/
+│   └── Program.cs
+├── Spine.Core/                 # Domain entities (no external dependencies)
+│   └── Entities/
+│       ├── User.cs
+│       ├── Book.cs
+│       ├── Series.cs
+│       ├── UserBook.cs
+│       ├── Tag.cs
+│       ├── Review.cs
+│       ├── Friendship.cs
+│       ├── Activity.cs
+│       └── PasswordResetToken.cs
+├── Spine.Infrastructure/       # EF Core, DbContext, Migrations
+│   ├── Data/
+│   │   └── AppDbContext.cs
+│   └── Migrations/
+├── Spine.Worker/               # Background service (Kafka Consumer)
+│   └── Worker.cs
+├── Spine.Tests/                # Unit & Integration tests
+│   ├── Integration/
+│   └── Unit/
+├── docker-compose.yml          # Local Kafka & Kafka-UI setup
+└── README.md
+
+---
