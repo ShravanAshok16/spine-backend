@@ -13,8 +13,11 @@ using Spine.Infrastructure.Data;
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Database
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+}
 
 // 2. Auth & Token Service
 builder.Services.AddScoped<TokenService>();
@@ -84,3 +87,5 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+public partial class Program { }
