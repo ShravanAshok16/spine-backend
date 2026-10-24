@@ -83,6 +83,8 @@ Spine/
 ├── docker-compose.yml          # Local Kafka & Kafka-UI setup
 └── README.md
 
+---
+
 ## 🚀 Setup
 
 ### Prerequisites
