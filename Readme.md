@@ -9,23 +9,24 @@ A production-grade, event-driven REST API for tracking physical book collections
 
 ## 📌 Current Status
 
-**Phase:** Sprint 1 — Core Backend
-**Progress:** `[█░░░░░░░░░] 10%` (Sprint 1, Day 1 Complete)
+**Phase:** Sprint 2 — Event-Driven Architecture
+**Progress:** `[██░░░░░░░░] 20%`
 
 ### ✅ Done
-- Solution architecture created: `Spine.Api`, `Spine.Core`, `Spine.Infrastructure`, `Spine.Tests`.
-- Installed core packages: EF Core, Npgsql, Serilog, JWT, FluentValidation, and Confluent.Kafka.
-- **Database Schema Designed:** Created 9 core entities and configured the `AppDbContext`.
-- **Relationships Configured:** Set up One-to-Many, Many-to-Many (Tags), and self-referencing graph tables (Friendships).
-- **Database Provisioned:** Initial migration generated and applied to Neon (PostgreSQL).
+- Solution architecture created: `Spine.Api`, `Spine.Core`, `Spine.Infrastructure`, `Spine.Tests`, `Spine.Worker`.
+- **Database Schema Designed:** Created 9 core entities and configured the `AppDbContext` with relationships and indexes.
+- **JWT Authentication:** Register, Login, and Account Management (Update Profile, Email, Password).
+- **Integration Tests:** 9 tests passing (Auth, Account Management, JWT Authorization).
+- **Kafka Setup:** Docker Compose configured with Kafka broker and Kafka UI.
+- **Event-Driven Producer:** API publishes `PasswordResetRequested` events to Kafka.
+- **Background Consumer:** `Spine.Worker` service listens to Kafka and processes password reset payloads asynchronously.
 
 ### 🚧 In Progress
-- Sprint 1, Day 2: JWT Authentication & Account Management.
+- Sprint 2, Day 4: Integrating Resend (Email Provider) into the Background Worker.
 
 ### 📝 Next Up
-- Implement `TokenService` and `AuthController` (Register/Login).
-- Implement `AccountController` (Update Profile, Email, Password).
-- Add FluentValidation for Auth DTOs.
+- Send actual HTML password reset emails.
+- Token validation and password reset endpoint.
 
 ---
 
@@ -49,63 +50,13 @@ The database is designed using a **Global Catalog** pattern to prevent duplicati
 
 ## 🏗️ Project Structure
 
-
-
----
-
-## 🛠️ Tech Stack
-
-- **.NET 10** (LTS)
-- **Entity Framework Core 10** + **Npgsql** (PostgreSQL)
-- **Neon** (Serverless PostgreSQL)
-- **Serilog** (Structured logging)
-- **FluentValidation** (Request validation)
-- **BCrypt.Net-Next** (Password hashing)
-- **Confluent.Kafka** (Event streaming — Sprint 2)
-
----
-
-## 🗓️ Daily Log
-
-### 2026-10-19 (Sprint 1, Day 1 — Schema & Foundation)
-- Created the `Spine` solution and 4 projects.
-- Installed EF Core, JWT, and Kafka packages.
-- Created 9 Domain Entities: `User`, `Book`, `Series`, `UserBook`, `Tag`, `Review`, `Friendship`, `Activity`, `PasswordResetToken`.
-- Configured `AppDbContext` with complex relationships:
-  - Composite indexes for fast dashboard queries (`UserId`, `Status`).
-  - Unique index to prevent users from adding the same book twice (`UserId`, `BookId`).
-  - **Self-referencing Foreign Keys** for the `Friendships` table (Requester and Receiver).
-  - Many-to-Many join table for `UserBookTags`.
-- Generated `InitialCreate` migration and applied it to Neon. Verified all 11 tables exist.
-
----
-
-## 🔐 Security Decisions (Planned)
-- **JWT:** Short-lived access tokens.
-- **Password Reset:** Secure, single-use hashed tokens sent via Kafka -> Email.
-- **Data Privacy:** `PrivateNotes` will be filtered out at the API level when a friend views a library.
-- **Ownership:** Users can only modify their own `UserBooks` and `Reviews`.
-
----
-
-## 📅 Roadmap
-
-- [x] **Sprint 1 (Days 1–4):** Foundation, DB Schema, JWT Auth, Account Management.
-- [ ] **Sprint 2 (Days 5–8):** Kafka integration for Password Resets & Email Worker.
-- [ ] **Sprint 3 (Days 9–13):** Open Library API, Redis Caching, Library CRUD.
-- [ ] **Sprint 4 (Days 14–17):** Book Details (Series, Where to Buy), Reviews API.
-- [ ] **Sprint 5 (Days 18–22):** Social Layer (Friendships, Privacy), Kafka Activity Feed.
-- [ ] **Sprint 6 (Days 23–28):** React Web Frontend (Dashboard, Book Details).
-- [ ] **Sprint 7 (Days 29–35):** Mobile App (Expo Scanner), Image Uploads, Deployment.
-
----
-## 🏗️ Project Structure
-```
+```text
 Spine/
 ├── Spine.Api/                  # HTTP endpoints, controllers, DTOs, Services
 │   ├── Controllers/
 │   ├── Models/
-│   ├── Services/
+│   ├── Services/               # TokenService, KafkaProducerService
+│   ├── Events/                 # Event DTOs (PasswordResetRequestedEvent)
 │   ├── Validators/
 │   ├── Middleware/
 │   └── Program.cs
@@ -124,7 +75,13 @@ Spine/
 │   ├── Data/
 │   │   └── AppDbContext.cs
 │   └── Migrations/
-└── Spine.Tests/                # Unit & Integration tests
+├── Spine.Worker/               # Background service (Kafka Consumer)
+│   └── Worker.cs
+├── Spine.Tests/                # Unit & Integration tests
+│   ├── Integration/
+│   └── Unit/
+├── docker-compose.yml          # Local Kafka & Kafka-UI setup
+└── README.md
 
 ## 🚀 Setup
 
@@ -137,4 +94,28 @@ Spine/
 git clone https://github.com/ShravanAshok16/Spine.git
 cd Spine
 dotnet restore
+
+# Initialize user secrets for the API
+dotnet user-secrets init --project Spine.Api
+
+# Add your Neon PostgreSQL connection string (convert to key-value format)
+dotnet user-secrets set "ConnectionStrings:Default" "Host=ep-xxx.aws.neon.tech;Database=neondb;Username=neondb_owner;Password=YOUR_PASSWORD;SSL Mode=Require;Trust Server Certificate=true" --project Spine.Api
+
+# Add a secure JWT Key (at least 32 characters)
+dotnet user-secrets set "Jwt:Key" "thisIsMySuperSecretJwtKeyForSpineApp_ChangeMe_12345" --project Spine.Api
+
+# Apply Database Migrations
+dotnet ef database update --project Spine.Infrastructure --startup-project Spine.Api
+
+# Start Kafka
+docker compose up -d
+
+# Run Application
+## The API
+dotnet run --project Spine.Api
+## The Background Worker
+dotnet run --project Spine.Worker
+
+# Run Automated Tests
+dotnet test
 
