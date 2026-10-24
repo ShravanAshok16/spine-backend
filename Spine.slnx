@@ -3,4 +3,5 @@
   <Project Path="Spine.Core/Spine.Core.csproj" />
   <Project Path="Spine.Infrastructure/Spine.Infrastructure.csproj" />
   <Project Path="Spine.Tests/Spine.Tests.csproj" />
+  <Project Path="Spine.Worker/Spine.Worker.csproj" />
 </Solution>

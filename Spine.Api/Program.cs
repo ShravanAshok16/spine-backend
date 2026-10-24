@@ -21,6 +21,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
 
 // 2. Auth & Token Service
 builder.Services.AddScoped<TokenService>();
+builder.Services.AddSingleton<KafkaProducerService>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>

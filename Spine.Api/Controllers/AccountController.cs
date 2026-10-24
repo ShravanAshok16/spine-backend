@@ -1,7 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Spine.Api.Events;
 using Spine.Api.Models;
+using Spine.Api.Services;
+using Spine.Core.Entities;
 using Spine.Infrastructure.Data;
 
 namespace Spine.Api.Controllers;
@@ -12,10 +16,12 @@ namespace Spine.Api.Controllers;
 public class AccountController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly KafkaProducerService _kafkaProducer;
 
-    public AccountController(AppDbContext db)
+    public AccountController(AppDbContext db, KafkaProducerService kafkaProducer)
     {
         _db = db;
+        _kafkaProducer = kafkaProducer;
     }
 
     [HttpGet("me")]
@@ -94,6 +100,44 @@ public class AccountController : ControllerBase
         await _db.SaveChangesAsync();
 
         return NoContent();
+    }
+
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ForgotPassword([FromBody] Models.ForgotPasswordRequest request)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == request.Email.ToLower());
+
+        // SECURITY: Always return 200 OK, even if the email doesn't exist. 
+        // This prevents attackers from guessing which emails are registered.
+        if (user is null)
+            return Ok(new { message = "If that email exists, a reset link has been sent." });
+
+        // 1. Generate a secure random token
+        var token = Guid.NewGuid().ToString("N");
+
+        // 2. Save the token to the database (expires in 15 mins)
+        var resetToken = new PasswordResetToken
+        {
+            UserId = user.Id,
+            TokenHash = token, // In a production app, hash this before saving!
+            ExpiresAt = DateTime.UtcNow.AddMinutes(15)
+        };
+
+        _db.PasswordResetTokens.Add(resetToken);
+        await _db.SaveChangesAsync();
+
+        // 3. Publish the event to Kafka
+        var resetEvent = new PasswordResetRequestedEvent
+        {
+            UserId = user.Id,
+            Email = user.Email,
+            Token = token
+        };
+
+        await _kafkaProducer.PublishPasswordResetEventAsync(resetEvent);
+
+        return Ok(new { message = "If that email exists, a reset link has been sent." });
     }
 
     // 🔥 This helper now lives inside the protected AccountController
