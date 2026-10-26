@@ -8,10 +8,12 @@ namespace Spine.Tests.Integration;
 public class AccountFlowTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebApplicationFactory _factory;
 
     public AccountFlowTests(CustomWebApplicationFactory factory)
     {
         _client = factory.CreateClient();
+        _factory = factory;
     }
 
     [Fact]
@@ -29,7 +31,7 @@ public class AccountFlowTests : IClassFixture<CustomWebApplicationFactory>
     {
         // Arrange
         var email = $"getme_{Guid.NewGuid()}@example.com";
-        var token = await TestHelpers.RegisterAndGetTokenAsync(_client, email);
+        var token = await TestHelpers.RegisterAndGetTokenAsync(_client, _factory, email);
         TestHelpers.AuthenticateClient(_client, token);
 
         // Act
@@ -46,7 +48,7 @@ public class AccountFlowTests : IClassFixture<CustomWebApplicationFactory>
     {
         // Arrange
         var email = $"badpass_{Guid.NewGuid()}@example.com";
-        var token = await TestHelpers.RegisterAndGetTokenAsync(_client, email);
+        var token = await TestHelpers.RegisterAndGetTokenAsync(_client, _factory, email);
         TestHelpers.AuthenticateClient(_client, token);
 
         var request = new UpdatePasswordRequest
@@ -68,7 +70,7 @@ public class AccountFlowTests : IClassFixture<CustomWebApplicationFactory>
     {
         // Arrange
         var email = $"update_{Guid.NewGuid()}@example.com";
-        var token = await TestHelpers.RegisterAndGetTokenAsync(_client, email);
+        var token = await TestHelpers.RegisterAndGetTokenAsync(_client, _factory, email);
         TestHelpers.AuthenticateClient(_client, token);
 
         var updateRequest = new UpdatePasswordRequest
@@ -83,7 +85,7 @@ public class AccountFlowTests : IClassFixture<CustomWebApplicationFactory>
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         // Act - Try to login with NEW password
-        var loginRequest = new LoginRequest { Email = email, Password = "NewPassword123!" };
+        var loginRequest = new LoginRequest { Identifier = email, Password = "NewPassword123!" };
         var loginResponse = await _client.PostAsJsonAsync("/api/Auth/login", loginRequest);
 
         // Assert

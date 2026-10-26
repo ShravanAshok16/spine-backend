@@ -8,14 +8,16 @@ namespace Spine.Tests.Integration;
 public class AuthFlowTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebApplicationFactory _factory;
 
     public AuthFlowTests(CustomWebApplicationFactory factory)
     {
         _client = factory.CreateClient();
+        _factory = factory;
     }
 
     [Fact]
-    public async Task Register_WithNewEmail_Returns200WithToken()
+    public async Task Register_WithNewEmail_Returns200()
     {
         // Arrange
         var email = $"newuser_{Guid.NewGuid()}@example.com";
@@ -34,11 +36,10 @@ public class AuthFlowTests : IClassFixture<CustomWebApplicationFactory>
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var result = await response.Content.ReadFromJsonAsync<AuthResponse>();
-        result.Should().NotBeNull();
-        result!.Token.Should().NotBeNullOrEmpty();
-        result.Email.Should().Be(email);
-        result.DisplayName.Should().Be("John Doe"); // Defaulted from FirstName + LastName
+
+        // Assert the response contains the message, not a token
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("Registration successful");
     }
 
     [Fact]
@@ -71,11 +72,11 @@ public class AuthFlowTests : IClassFixture<CustomWebApplicationFactory>
     {
         // Arrange
         var email = $"login_{Guid.NewGuid()}@example.com";
-        await TestHelpers.RegisterAndGetTokenAsync(_client, email);
+        await TestHelpers.RegisterAndGetTokenAsync(_client, _factory, email);
 
         var loginRequest = new LoginRequest
         {
-            Email = email,
+            Identifier = email,
             Password = "Password123!"
         };
 
@@ -93,11 +94,11 @@ public class AuthFlowTests : IClassFixture<CustomWebApplicationFactory>
     {
         // Arrange
         var email = $"wrongpass_{Guid.NewGuid()}@example.com";
-        await TestHelpers.RegisterAndGetTokenAsync(_client, email);
+        await TestHelpers.RegisterAndGetTokenAsync(_client, _factory, email);
 
         var loginRequest = new LoginRequest
         {
-            Email = email,
+            Identifier = email,
             Password = "WrongPassword123!"
         };
 

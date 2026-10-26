@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Spine.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b68dcbf56ae7ac5a53d977ec0e04058b52c7aca3")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0df0354dcb917aeeb0a69f20b9aa779b580b6e97")]
 [assembly: System.Reflection.AssemblyProductAttribute("Spine.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Spine.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

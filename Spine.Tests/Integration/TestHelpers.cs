@@ -1,12 +1,18 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Spine.Api.Models;
+using Spine.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace Spine.Tests.Integration;
 
 public static class TestHelpers
 {
-    public static async Task<string> RegisterAndGetTokenAsync(HttpClient client, string email)
+    public static async Task<string> RegisterAndGetTokenAsync(
+        HttpClient client, 
+        CustomWebApplicationFactory factory, // Pass factory to access DB
+        string email)
     {
         var request = new RegisterRequest
         {
@@ -22,7 +28,22 @@ public static class TestHelpers
         var response = await client.PostAsJsonAsync("/api/Auth/register", request);
         response.EnsureSuccessStatusCode();
 
-        var authResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
+        // 1. Bypass verification by updating the DB directly
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
+        if (user != null)
+        {
+            user.IsEmailVerified = true;
+            await db.SaveChangesAsync();
+        }
+
+        // 2. Now login to get the token
+        var loginRequest = new LoginRequest { Identifier = email, Password = "Password123!" };
+        var loginResponse = await client.PostAsJsonAsync("/api/Auth/login", loginRequest);
+        loginResponse.EnsureSuccessStatusCode();
+
+        var authResponse = await loginResponse.Content.ReadFromJsonAsync<AuthResponse>();
         return authResponse!.Token;
     }
 

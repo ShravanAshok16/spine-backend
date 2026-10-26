@@ -23,6 +23,8 @@ if (!builder.Environment.IsEnvironment("Testing"))
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<KafkaProducerService>();
 
+builder.Services.AddHttpClient<OpenLibraryService>();
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {

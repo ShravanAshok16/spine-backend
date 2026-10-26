@@ -10,5 +10,10 @@
   <ItemGroup>
     <PackageReference Include="Confluent.Kafka" Version="2.16.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.13" />
+    <PackageReference Include="Resend" Version="0.24.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Spine.Api\Spine.Api.csproj" />
   </ItemGroup>
 </Project>

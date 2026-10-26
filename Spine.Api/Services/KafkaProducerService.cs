@@ -2,39 +2,44 @@ using Confluent.Kafka;
 using System.Text.Json;
 using Spine.Api.Events;
 
+
 namespace Spine.Api.Services;
 
 public class KafkaProducerService
 {
     private readonly IProducer<Null, string> _producer;
-    private readonly string _topic = "password-reset-events";
 
     public KafkaProducerService(IConfiguration config)
     {
         var producerConfig = new ProducerConfig
         {
-            BootstrapServers = config["Kafka:BootstrapServers"] ?? "localhost:9092"
+            BootstrapServers = config?["Kafka:BootstrapServers"] ?? "localhost:9092"
         };
 
         _producer = new ProducerBuilder<Null, string>(producerConfig).Build();
     }
 
-    public async Task PublishPasswordResetEventAsync(PasswordResetRequestedEvent resetEvent)
+    // Method 1: For Password Reset
+    public virtual async Task PublishPasswordResetEventAsync(PasswordResetRequestedEvent resetEvent)
     {
         var message = new Message<Null, string>
         {
             Value = JsonSerializer.Serialize(resetEvent)
         };
 
-        try
+        var deliveryResult = await _producer.ProduceAsync("password-reset-events", message);
+        Console.WriteLine($"Delivered 'password-reset' message to {deliveryResult.TopicPartitionOffset}");
+    }
+
+    // Method 2: For User Registration
+    public virtual async Task PublishUserRegisteredEventAsync(UserRegisteredEvent registerEvent)
+    {
+        var message = new Message<Null, string>
         {
-            var deliveryResult = await _producer.ProduceAsync(_topic, message);
-            Console.WriteLine($"Delivered message to {deliveryResult.TopicPartitionOffset}");
-        }
-        catch (ProduceException<Null, string> e)
-        {
-            Console.WriteLine($"Delivery failed: {e.Error.Reason}");
-            throw;
-        }
+            Value = JsonSerializer.Serialize(registerEvent)
+        };
+
+        var deliveryResult = await _producer.ProduceAsync("user-registered-events", message);
+        Console.WriteLine($"Delivered 'user-registered' message to {deliveryResult.TopicPartitionOffset}");
     }
 }
