@@ -9,24 +9,27 @@ A production-grade, event-driven REST API for tracking physical book collections
 
 ## 📌 Current Status
 
-**Phase:** Sprint 2 — Event-Driven Architecture
-**Progress:** `[██░░░░░░░░] 20%`
+**Phase:** Sprint 4 — Core Library & Reviews Complete
+**Progress:** `[████████░░] 80%` (Backend)
 
 ### ✅ Done
-- Solution architecture created: `Spine.Api`, `Spine.Core`, `Spine.Infrastructure`, `Spine.Tests`, `Spine.Worker`.
-- **Database Schema Designed:** Created 9 core entities and configured the `AppDbContext` with relationships and indexes.
-- **JWT Authentication:** Register, Login, and Account Management (Update Profile, Email, Password).
-- **Integration Tests:** 9 tests passing (Auth, Account Management, JWT Authorization).
-- **Kafka Setup:** Docker Compose configured with Kafka broker and Kafka UI.
-- **Event-Driven Producer:** API publishes `PasswordResetRequested` events to Kafka.
-- **Background Consumer:** `Spine.Worker` service listens to Kafka and processes password reset payloads asynchronously.
+- **Architecture:** Clean Architecture with `Spine.Api`, `Spine.Core`, `Spine.Infrastructure`, `Spine.Worker`, and `Spine.Tests`.
+- **Database:** 9 core entities with Global Catalog pattern, Self-referencing Graph (Friendships), and custom tags.
+- **Authentication:** JWT Auth, BCrypt hashing, Account Management, and Email Verification enforcement.
+- **Event-Driven:** Apache Kafka Producer and Background Consumer Worker.
+- **Email:** Resend API integration for actual HTML email delivery (Password Reset & Verification).
+- **Testing:** 9 passing Integration Tests using InMemory DB and Mock Kafka.
+- **External APIs:** Open Library integration (fetching metadata, covers, authors, and descriptions by ISBN).
+- **Library Management:** Add books to personal library, track current page, update reading status (Unread, Reading, Finished, DNF), and write private notes.
+- **Reviews:** Users can leave public 1-5 star reviews and text.
 
 ### 🚧 In Progress
-- Sprint 2, Day 4: Integrating Resend (Email Provider) into the Background Worker.
+- Sprint 5: The Social Layer (Friendships & Privacy Settings).
 
 ### 📝 Next Up
-- Send actual HTML password reset emails.
-- Token validation and password reset endpoint.
+- Send/Accept friend requests.
+- View friends' libraries based on privacy settings.
+- Activity Feed generation.
 
 ---
 
@@ -47,6 +50,30 @@ The database is designed using a **Global Catalog** pattern to prevent duplicati
 | `PasswordResetTokens` | Secure reset tokens | Belongs to `User` |
 
 ---
+
+## 🏗️ Project Structure
+
+### Backend Architecture
+
+```text
+Spine/
+├── Spine.Api/                  # HTTP endpoints, controllers, DTOs, Services
+│   ├── Controllers/            # Auth, Account, UserBooks, Books, Reviews
+│   ├── Models/                 # DTOs
+│   ├── Services/               # TokenService, KafkaProducerService, OpenLibraryService
+│   ├── Events/                 # Event DTOs (PasswordReset, UserRegistered)
+│   ├── Validators/             # FluentValidation
+│   └── Program.cs
+├── Spine.Core/                 # Domain entities (no external dependencies)
+│   └── Entities/
+├── Spine.Infrastructure/       # EF Core, DbContext, Migrations
+│   ├── Data/
+│   └── Migrations/
+├── Spine.Worker/               # Background service (Kafka Consumer)
+│   └── KafkaConsumerWorker.cs
+├── Spine.Tests/                # Unit & Integration tests
+├── docker-compose.yml          # Local Kafka & Kafka-UI setup
+└── README.md
 
 ## 🚀 Setup
 

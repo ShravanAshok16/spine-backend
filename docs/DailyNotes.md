@@ -3,7 +3,7 @@ SPINE API — DAILY NOTES, SETUP & RETROSPECTIVE
 =====================================================================
 Author: Shravan Ashok
 Project: Spine (Book Library & Social Tracker)
-Coverage: Sprint 1 & Sprint 2 (Days 1–4)
+Coverage: Sprint 1 through Sprint 4
 =====================================================================
 
 
@@ -15,12 +15,14 @@ PART 0 — COMPLETE SETUP INSTRUCTIONS FROM SCRATCH
 1. .NET 10 SDK (dotnet --version should print 10.x.x)
 2. Docker Desktop (Required for local Kafka)
 3. Neon Account (Free Serverless PostgreSQL)
+4. Resend Account (For email delivery)
 
 --- 0.2 Configure Secrets (User Secrets) ---
 Run these in the root `Spine` folder:
   dotnet user-secrets init --project Spine.Api
   dotnet user-secrets set "ConnectionStrings:Default" "Host=...;Database=neondb;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true" --project Spine.Api
   dotnet user-secrets set "Jwt:Key" "thisIsMySuperSecretJwtKeyForSpineApp_ChangeMe_12345" --project Spine.Api
+  dotnet user-secrets set "Resend:ApiKey" "re_YOUR_API_KEY" --project Spine.Worker
 
 --- 0.3 Start Kafka ---
 We use Docker to run a local Kafka broker and UI.
@@ -41,108 +43,102 @@ PART 1 — SPRINT 1: DATABASE & AUTHENTICATION
 =====================================================================
 
 --- Day 1: Database Schema & Foundation ---
-What we did: Designed 9 complex relational tables and applied the initial migration to Neon.
-
 Key Architectural Decisions:
-1. **Global Catalog Pattern:** We created a `Books` table (Global) and a `UserBooks` table (Join). This prevents saving "Harry Potter" 1,000 times for 1,000 users. It's saved once, and users link to it. This drastically reduces database size and makes searching faster.
-2. **Soft Deletes:** `UserBooks` has `IsDeleted` and `DeletedAt`. We never hard-delete user data immediately. This allows for a "Trash Bin" feature.
-3. **Self-Referencing Graph:** The `Friendships` table has TWO foreign keys to `Users` (`RequesterId` and `ReceiverId`). 
+1. **Global Catalog Pattern:** We created a `Books` table (Global) and a `UserBooks` table (Join). This prevents saving "Harry Potter" 1,000 times for 1,000 users. It's saved once, and users link to it.
+2. **Soft Deletes:** `UserBooks` has `IsDeleted` and `DeletedAt`. We never hard-delete user data immediately.
+3. **Self-Referencing Graph:** The `Friendships` table has TWO foreign keys to `Users` (`RequesterId` and `ReceiverId`). We used `DeleteBehavior.Restrict` so deleting a user doesn't cascade delete their friends.
 4. **Many-to-Many:** `Tags` to `UserBooks` requires an automatic join table (`UserBookTags`).
 
 --- Day 2 & 3: Auth & Account Management ---
-What we did: Built JWT auth, BCrypt hashing, and self-service account updates.
-
 Key Architectural Decisions:
-1. **JWT (JSON Web Tokens):** Stateless authentication. The token contains the User's ID (`sub` claim) and Email.
-2. **BCrypt:** Passwords are hashed with a work factor. Never stored in plain text.
-3. **FluentValidation:** Kept validation strictly to *formatting* (e.g., password length). Database checks (like "is this email already taken?") were kept in the Controller.
-4. **Integration Tests:** Wrote 9 tests covering the happy paths, wrong passwords, and unauthorized access.
+1. **JWT:** Stateless auth. Claims: `sub` (UserId), `email`.
+2. **Login via Email OR Username:** We changed the `LoginRequest` to use `Identifier` and check `u.Email == identifier || u.DisplayName.ToLower() == identifier`.
+3. **FluentValidation:** Kept validation strictly to *formatting*. Database checks (like "is this email already taken?") were moved into the Controller because the auto-validation pipeline is synchronous and cannot handle async database calls.
 
----
 
 =====================================================================
-PART 2 — SPRINT 2: EVENT-DRIVEN ARCHITECTURE (KAFKA)
+PART 2 — SPRINT 2: EVENT-DRIVEN ARCHITECTURE & EMAILS
 =====================================================================
 
---- Day 1–3: Kafka Producer & Consumer ---
-What we did: Decoupled the email-sending process from the HTTP request using Apache Kafka.
-
+--- Day 1–4: Kafka, Resend, and Email Verification ---
 Why Event-Driven?
-If the API sends a password reset email synchronously (SMTP), the user waits 2–3 seconds. If the email provider (SendGrid/Resend) is down, the request times out or crashes. 
+If the API sends an email synchronously, the user waits 2–3 seconds. If Resend is down, the request crashes. 
 With Kafka:
 1. API saves token to DB.
-2. API drops a JSON message in Kafka.
-3. API returns `200 OK` instantly (takes ~50ms).
-4. `Spine.Worker` (a separate background process) reads Kafka and sends the email.
+2. API drops a JSON message in Kafka and returns `200 OK` instantly.
+3. `Spine.Worker` reads Kafka and sends the email.
 
-How we built it:
-- **Producer:** `KafkaProducerService` uses `IProducer<Null, string>` to publish a `PasswordResetRequestedEvent` to the `password-reset-events` topic.
-- **Consumer:** `Spine.Worker` inherits from `BackgroundService`. It sets up a `ConsumerConfig` with `GroupId = "spine-email-worker-group"` and `AutoOffsetReset = Earliest`. It listens in an infinite `while` loop and logs the messages.
-
-
-=====================================================================
-PART 3 — PROBLEMS FACED AND HOW WE FIXED THEM
-=====================================================================
-
-1. **Docker CLI Error: `docker-compose: not recognized`**
-   - Cause: Docker Desktop recently replaced the `docker-compose` command with `docker compose`.
-   - Fix: Run `docker compose up -d` (with a space).
-
-2. **Docker Error: `docker: not recognized`**
-   - Cause: Docker Desktop wasn't installed, or the terminal didn't have the PATH updated.
-   - Fix: Installed Docker Desktop, restarted VS Code, and added `C:\Program Files\Docker\Docker\resources\bin` to the system PATH.
-
-3. **FluentValidation Error: `AsyncValidatorInvokedSynchronouslyException`**
-   - Cause: We tried to use `.MustAsync()` to check if an email existed in the DB inside `RegisterRequestValidator`. ASP.NET's auto-validation pipeline is synchronous and crashes on async rules.
-   - Fix: Removed `.MustAsync()` from the validator. Moved the database duplicate check into `AuthController.Register` using `await _db.Users.AnyAsync(...)`.
-
-4. **Test Error: `Npgsql` and `InMemory` providers registered together**
-   - Cause: `WebApplicationFactory` starts `Program.cs` (which registers Npgsql) and then the test factory tries to add InMemory. EF Core refuses to have two database providers.
-   - Fix: Added `if (!builder.Environment.IsEnvironment("Testing"))` around the Npgsql registration in `Program.cs`. The test factory sets the environment to "Testing", so Npgsql is skipped entirely.
-
-5. **Test Error: `Register 200` followed by `Login 401`**
-   - Cause: `options.UseInMemoryDatabase("Db_" + Guid.NewGuid())` was inside a lambda. The Guid ran on EVERY request, creating a fresh, empty database for every single HTTP call.
-   - Fix: Captured the DB name *outside* the lambda: `var dbName = "Db_" + Guid.NewGuid();` so it stays consistent for the whole test run.
-
-6. **Build Error: `GetCurrentUserId` does not exist**
-   - Cause: We accidentally pasted the `AccountController` code (which uses JWT claims) into `AuthController` (which doesn't require auth).
-   - Fix: Moved the `GetCurrentUserId()` helper and the `[Authorize]` protected endpoints back into `AccountController`.
-
-7. **Build Error: `The type or namespace name 'UpdateProfileRequest' could not be found`**
-   - Cause: Forgot to create the DTO files for the Account endpoints.
-   - Fix: Created `UpdateProfileRequest.cs`, `UpdateEmailRequest.cs`, and `UpdatePasswordRequest.cs` in `Spine.Api/Models`.
-
-8. **Error: `The file is locked by "Spine.Api"`**
-   - Cause: `dotnet watch` was running in another terminal, locking the `.dll` files so the test runner couldn't compile.
-   - Fix: Stopped the API (Ctrl+C) before running `dotnet test`.
-
-9. **Test Error: `Login_ValidCredentials_ReturnsToken` failed**
-   - Cause: The `TestHelpers.RegisterAndGetTokenAsync()` method registered the user, but the returned token wasn't being attached to the client correctly.
-   - Fix: Used `client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);` inside the helper.
-
-10. **Warning: `MSB3277: Found conflicts between different versions of Microsoft.EntityFrameworkCore.Relational`**
-    - Cause: `Npgsql.EntityFrameworkCore.PostgreSQL` pulled in EF Core 10.0.4, while the rest of the project used 10.0.13.
-    - Fix: Ignored for now (harmless). In production, you can fix it by adding an explicit `<PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.13" />` to `Spine.Infrastructure.csproj`.
-
-11. **README File Encoding (Mojibake)**
-    - Cause: Saving the markdown file with Windows-1252 encoding turned emojis (🌐) and tree branches (├──) into gibberish (рџЊђ, в”њв”Ђв”Ђ).
-    - Fix: In VS Code, clicked the encoding in the bottom right, chose "Save with Encoding", and selected "UTF-8".
+Key Features:
+- **Producer:** `KafkaProducerService` publishes to `password-reset-events` and `user-registered-events`.
+- **Consumer:** `Spine.Worker` listens to both topics.
+- **Email Verification:** Users cannot log in until they click the link in the email sent by Resend.
+- **Resend Sandbox:** On the free tier, you can only send emails to the email address you used to sign up for Resend.
 
 
 =====================================================================
-PART 4 — WHAT WENT WELL & KEY TAKEAWAYS
+PART 3 — SPRINT 3 & 4: EXTERNAL APIS & LIBRARY MANAGEMENT
 =====================================================================
 
-What Went Well:
+--- Day 1–2: Open Library Integration ---
+- **OpenLibraryService:** Calls `https://openlibrary.org/isbn/{isbn}.json`.
+- **The 3-Call Problem:** Open Library splits its data. To get Title + Author + Description, we had to make 3 HTTP calls (1 for the book, 1 for the author key, 1 for the work key).
+- **Adding a Book:** `POST /api/UserBooks` takes an ISBN, checks if the `Book` exists in our Global Catalog. If not, it saves it. Then it links it to the user in `UserBooks`.
+
+--- Day 3–4: Library Management & Reviews ---
+- **GET /api/UserBooks:** Supports filtering (`?status=Reading`), searching (`?search=hobbit`), and sorting (`?sort=title_asc`).
+- **PUT /api/UserBooks/{id}:** Updates `Status`, `CurrentPage`, `PersonalRating` (1-5 int), `PrivateNotes`, and `LentTo`.
+- **Reviews:** Users can post a 1-5 star review. The API calculates the `AverageRating` for the book using LINQ `Average()`.
+
+
+=====================================================================
+PART 4 — PROBLEMS FACED AND HOW WE FIXED THEM
+=====================================================================
+
+1. **FluentValidation Error: `AsyncValidatorInvokedSynchronouslyException`**
+   - Cause: Used `.MustAsync()` to check DB for existing emails.
+   - Fix: Removed it from the Validator. Moved the DB check to `AuthController` using `await _db.Users.AnyAsync(...)`.
+
+2. **Test Error: `Npgsql` and `InMemory` providers registered together**
+   - Cause: `WebApplicationFactory` registered both the real DB and the test DB.
+   - Fix: Added `if (!builder.Environment.IsEnvironment("Testing"))` around the Npgsql registration in `Program.cs`.
+
+3. **Test Error: `Register 200` followed by `Login 401`**
+   - Cause: `options.UseInMemoryDatabase("Db_" + Guid.NewGuid())` created a fresh DB for every request.
+   - Fix: Captured the DB name *outside* the lambda: `var dbName = "Db_" + Guid.NewGuid();`.
+
+4. **Test Error: Kafka Hangs for 2 minutes**
+   - Cause: The tests tried to connect to `localhost:9092`, which wasn't running.
+   - Fix: Created `MockKafkaProducerService` and used `services.RemoveAll` / `AddSingleton` in the test factory to swap the real Kafka service for the mock. Also marked the real methods as `virtual`.
+
+5. **Test Error: `MockKafkaProducerService` NullReferenceException**
+   - Cause: The mock called `base(null!)`, causing the base constructor to crash when trying to read `config["..."]`.
+   - Fix: Changed the base constructor to use `config?["..."]` to handle null gracefully.
+
+6. **Kafka Worker Error: `Subscribed topic not available`**
+   - Cause: The Worker started before the topics (`user-registered-events`) were created by the API.
+   - Fix: Moved `consumer.Consume()` inside the `try` block and caught `ConsumeException` when `ex.Error.Code == ErrorCode.UnknownTopicOrPart`. Added a 2-second delay and retry.
+
+7. **Resend Error: `You can only send testing emails to your own email address`**
+   - Cause: Resend's free sandbox restricts sending to any email other than the signup email.
+   - Fix: Register a user using the exact email used to sign up for Resend. (For production, a custom domain must be verified).
+
+8. **Build Error: `GetCurrentUserId` does not exist**
+   - Cause: Pasted the protected `AccountController` code into `AuthController` (which has no `[Authorize]`).
+   - Fix: Moved the helper method back to the correct controller.
+
+9. **README File Encoding (Mojibake)**
+   - Cause: Saving with Windows-1252 turned emojis into gibberish.
+   - Fix: In VS Code, changed encoding to UTF-8 (bottom right).
+
+
+=====================================================================
+PART 5 — WHAT WENT WELL & KEY TAKEAWAYS
+=====================================================================
+
 - **Architecture:** The separation of `Spine.Api` and `Spine.Worker` works perfectly. It's a real-world microservice pattern.
-- **Event-Driven Resilience:** We proved that if the API receives a request, it drops it in Kafka and returns instantly. Even if the worker crashes, the message is safe in Kafka and will be processed when it restarts.
-- **Testing:** The integration tests caught several bugs (like the InMemory database reset issue) before they ever hit production.
-- **Security:** Using User Secrets and `[Authorize]` attributes means we have zero secrets in Git, and data is protected by default.
-
-Key Takeaways for the Future:
-- Never put database logic inside a FluentValidation rule. Use the Controller.
-- In .NET testing, environment variables and class-level variables must be carefully managed so state doesn't accidentally reset between HTTP calls.
-- Kafka is not just for Big Data; it's a powerful tool for any app that needs to do background work (like sending emails) without blocking the user.
+- **Resilience:** Even if Resend goes down, the API returns 200 OK, and the message is safe in Kafka.
+- **Testing:** The integration tests caught several bugs before they hit production.
+- **External APIs:** We learned how to normalize messy third-party data (Open Library) into our own DTOs.
 
 =====================================================================
 END OF NOTES

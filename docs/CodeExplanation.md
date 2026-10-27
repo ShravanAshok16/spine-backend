@@ -2,7 +2,7 @@
 SPINE API — COMPLETE LEARNING NOTES ON SOURCE CODE
 =====================================================================
 Author: Shravan Ashok
-Coverage: Sprint 1 & Sprint 2 (Days 1–4)
+Coverage: Sprint 1 through Sprint 4
 =====================================================================
 
 
@@ -11,120 +11,124 @@ PART 1 — DOMAIN ENTITIES & DB CONTEXT
 =====================================================================
 
 --- Spine.Core/Entities/User.cs ---
-  - Represents the User table.
-  - Fields: Id (Guid), Email, PasswordHash, FirstName, LastName,
-    PhoneNumber, DisplayName, PrivacySetting, CreatedAt, IsActive.
-  - Key concept: PrivacySetting (Public, FriendsOnly, Private) 
-    determines who can see the user's library.
+  - Represents the User.
+  - Fields: Id, Email, PasswordHash, FirstName, LastName, PhoneNumber,
+    DisplayName, PrivacySetting, IsEmailVerified, EmailVerificationToken.
+  - Key concept: PrivacySetting (Public, FriendsOnly, Private) determines
+    who can see the user's library.
 
 --- Spine.Core/Entities/Book.cs ---
-  - The Global Catalog of books. 
-  - Fields: Id, Isbn, Title, Author, CoverUrl, Description, PageCount,
-    SeriesId, SeriesPosition.
-  - Key concept: Books are shared across all users to save database space.
-    If two users add "The Hobbit", there is only ONE row in the Books table.
+  - The Global Catalog.
+  - Fields: Id, Isbn, Title, Author, CoverUrl, Description, PageCount.
+  - Key concept: Books are shared across all users. Two users adding "The
+    Hobbit" results in ONE row in the Books table.
 
 --- Spine.Core/Entities/UserBook.cs ---
-  - The Join table between User and Book (The Personal Library).
-  - Fields: Id, UserId, BookId, Status, CurrentPage, PersonalRating,
-    PrivateNotes, LentTo, IsDeleted.
-  - Key concept: UserId is a FK to Users. BookId is a FK to Books.
+  - The Join table (Personal Library).
+  - Fields: Id, UserId, BookId, Status (Reading/Finished), CurrentPage,
+    PersonalRating (1-5), PrivateNotes, LentTo, IsDeleted.
 
 --- Spine.Infrastructure/Data/AppDbContext.cs ---
-  - The bridge between C# and PostgreSQL.
   - `OnModelCreating` configuration:
-    - `e.HasIndex(x => new { x.UserId, x.Status })` → Composite index for fast dashboard queries.
-    - `e.HasIndex(x => new { x.UserId, x.BookId }).IsUnique()` → Prevents a user from adding the same book to their library twice.
-    - Friendship setup:
-      `e.HasOne(x => x.Requester).WithMany().HasForeignKey(x => x.RequesterId).OnDelete(DeleteBehavior.Restrict);`
-      *Why Restrict?* If a user deletes their account, we don't want to accidentally delete all their friends' accounts. We prevent the delete until friendships are resolved.
+    - `e.HasIndex(x => new { x.UserId, x.Status })` → Fast dashboard queries.
+    - `e.HasIndex(x => new { x.UserId, x.BookId }).IsUnique()` → Prevents
+      adding the same book twice.
+    - Friendship: `HasOne(x => x.Requester).WithMany().OnDelete(Restrict)`.
 
 
 =====================================================================
 PART 2 — AUTH & ACCOUNT CONTROLLERS
 =====================================================================
 
---- Spine.Api/Services/TokenService.cs ---
-  - Generates the JWT.
-  - Uses `SymmetricSecurityKey` with `Jwt:Key` from appsettings.
-  - Claims included: `sub` (User.Id), `email`.
-  - Expiry read from config (`Jwt:ExpiresMinutes`, default 30).
-
 --- Spine.Api/Controllers/AuthController.cs ---
   - `POST /api/Auth/register`:
-    - Checks if email exists using `await _db.Users.AnyAsync(...)`.
-    - Defaults `DisplayName` to FirstName + LastName if left blank.
-    - Hashes password: `BCrypt.Net.BCrypt.HashPassword(request.Password)`.
-    - Returns `AuthResponse` with the JWT.
+    - Generates an `EmailVerificationToken` (`Guid.NewGuid().ToString("N")`).
+    - Saves user with `IsEmailVerified = false`.
+    - Calls `_kafkaProducer.PublishUserRegisteredEventAsync(verifyEvent)`.
+    - Returns 200 OK (does NOT return a JWT yet).
   - `POST /api/Auth/login`:
-    - Uses `_db.Users.FirstOrDefaultAsync(u => u.Email == email)`.
-    - Verifies password: `BCrypt.Net.BCrypt.Verify(...)`.
-    - Returns 401 Unauthorized with a generic error if failed.
+    - Finds user by `Identifier` (Email OR DisplayName).
+    - If `!user.IsEmailVerified`, returns 401 Unauthorized.
+    - Verifies password with BCrypt, returns JWT.
+  - `GET /api/Auth/verify-email`:
+    - Looks up user by `EmailVerificationToken`.
+    - Sets `IsEmailVerified = true`, clears the token, saves.
 
 --- Spine.Api/Controllers/AccountController.cs ---
-  - Has `[Authorize]` at the class level. Every endpoint requires a valid JWT.
-  - `GetCurrentUserId()`: Helper method that extracts the `sub` claim from the JWT. Throws an error if it doesn't exist.
-  - `PUT /api/Account/email`:
-    - Requires `CurrentPassword` to prevent stolen tokens from changing emails.
-    - Checks if the new email is already taken by someone else.
-  - `PUT /api/Account/password`:
-    - Verifies current password.
-    - Hashes new password and saves it.
+  - Protected with `[Authorize]`.
+  - `GetCurrentUserId()`: Extracts the `sub` claim from the JWT.
+  - `PUT /email`: Requires current password, checks new email isn't taken.
+  - `PUT /password`: Requires current password, hashes new password.
 
 
 =====================================================================
-PART 3 — KAFKA EVENT-DRIVEN ARCHITECTURE
+PART 3 — KAFKA & THE WORKER
 =====================================================================
-
---- Spine.Api/Events/PasswordResetRequestedEvent.cs ---
-  - The DTO representing the message sent to Kafka.
-  - Fields: UserId, Email, Token, RequestedAt.
 
 --- Spine.Api/Services/KafkaProducerService.cs ---
-  - The Producer (Pub/Sub).
-  - Uses `IProducer<Null, string>` from `Confluent.Kafka`.
-  - Connects to `localhost:9092` (from appsettings).
-  - `PublishPasswordResetEventAsync()`:
-    - Serializes the event to JSON using `JsonSerializer.Serialize()`.
-    - Calls `_producer.ProduceAsync("password-reset-events", message)`.
+  - Uses `IProducer<Null, string>`.
+  - `PublishPasswordResetEventAsync()` → Sends to `password-reset-events`.
+  - `PublishUserRegisteredEventAsync()` → Sends to `user-registered-events`.
+  - Marked as `virtual` so it can be mocked in tests.
 
---- Spine.Api/Controllers/AccountController.cs (Forgot Password) ---
-  - `POST /api/Account/forgot-password`:
-    - Has `[AllowAnonymous]` because the user can't log in to request a reset.
-    - Finds user by email. (If null, returns 200 OK anyway to prevent email enumeration).
-    - Generates a token (`Guid.NewGuid().ToString("N")`).
-    - Saves the token to `PasswordResetTokens` (expires in 15 mins).
-    - Calls `_kafkaProducer.PublishPasswordResetEventAsync()`.
-    - Returns 200 OK immediately. (No waiting for email).
+--- Spine.Worker/KafkaConsumerWorker.cs ---
+  - Inherits `BackgroundService`.
+  - Subscribes to `["password-reset-events", "user-registered-events"]`.
+  - The `while` loop contains a `try/catch (ConsumeException)`. If a topic
+    doesn't exist yet, it waits 2 seconds and retries instead of crashing.
+  - Resolves `EmailService` via `_serviceProvider.CreateScope()` to
+    avoid scoped dependency errors in a singleton background worker.
 
---- Spine.Worker/Worker.cs ---
-  - The Background Consumer (Subscriber).
-  - Inherits from `BackgroundService`.
-  - `ExecuteAsync()`:
-    - Sets up `ConsumerConfig` with `GroupId = "spine-email-worker-group"` and `AutoOffsetReset = Earliest`.
-    - Subscribes to `"password-reset-events"`.
-    - Runs a `while (!stoppingToken.IsCancellationRequested)` loop.
-    - Calls `consumer.Consume(stoppingToken)` to block and wait for a message.
-    - Logs `consumeResult.Message.Value`.
-    - *(Future: Parse JSON and send an email via SendGrid).*
+--- Spine.Worker/Services/EmailService.cs ---
+  - Uses Resend SDK.
+  - `SendVerificationEmailAsync()`: Generates HTML email with a link to
+    `http://localhost:5173/verify-email?token={token}`.
 
 
 =====================================================================
-PART 4 — INTEGRATION TESTS & TRICKY FIXES
+PART 4 — EXTERNAL APIS & LIBRARY MANAGEMENT
+=====================================================================
+
+--- Spine.Api/Services/OpenLibraryService.cs ---
+  - Uses `HttpClient`.
+  - `GetBookByIsbnAsync()`:
+    1. Calls `/isbn/{isbn}.json` for Title and PageCount.
+    2. Calls `/authors/{key}.json` for Author Name.
+    3. Calls `/works/{key}.json` for Description.
+  - Returns a clean `BookSearchResultDto`.
+
+--- Spine.Api/Controllers/UserBooksController.cs ---
+  - `POST /api/UserBooks`:
+    - Calls OpenLibraryService.
+    - Checks if Book exists in Global Catalog (`_db.Books.AnyAsync(b => b.Isbn == isbn)`).
+    - If not, creates it. Then links it to User via `UserBook`.
+  - `GET /api/UserBooks`:
+    - Supports `?status=`, `?search=`, and `?sort=title_asc`.
+    - Uses `.Include(ub => ub.Book)` to join the Global Catalog data.
+  - `PUT /api/UserBooks/{id}`:
+    - Updates CurrentPage, Rating, and Notes.
+
+--- Spine.Api/Controllers/ReviewsController.cs ---
+  - `POST /api/Reviews/book/{bookId}`: Creates a 1-5 star review.
+  - `GET /api/Reviews/book/{bookId}`: Returns all reviews and calculates
+    `AverageRating` using LINQ `Average()`.
+
+
+=====================================================================
+PART 5 — INTEGRATION TESTS & TRICKY FIXES
 =====================================================================
 
 --- Spine.Tests/Integration/CustomWebApplicationFactory.cs ---
-  - Replaces the real Npgsql database with an InMemory database.
-  - Key fix 1: `if (!builder.Environment.IsEnvironment("Testing"))` in Program.cs skips the Npgsql registration.
-  - Key fix 2: `var dbName = "SpineTestDb_" + Guid.NewGuid();` is declared OUTSIDE the lambda. If it's inside, a new database is created for every single HTTP request, causing login to fail immediately after registration.
+  - Replaces real Npgsql with InMemory.
+  - Swaps real Kafka with `MockKafkaProducerService`.
+  - `var dbName = "SpineTestDb_" + Guid.NewGuid();` is outside the lambda
+    to keep the DB persistent across HTTP requests.
 
 --- Spine.Tests/Integration/TestHelpers.cs ---
-  - `RegisterAndGetTokenAsync()`: A helper method to register a user and return the JWT.
-  - `AuthenticateClient()`: Attaches the token to `client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token)`.
-
---- Spine.Api/Validators/RegisterRequestValidator.cs ---
-  - Checks Email format, Password complexity (length, uppercase, number, special char), and matching ConfirmPassword.
-  - Mistake made: We cannot use `.MustAsync()` to check if an email exists in the database here. ASP.NET Core's validation pipeline is synchronous and will throw `AsyncValidatorInvokedSynchronouslyException`. Database checks must be done inside the Controller.
+  - `RegisterAndGetTokenAsync()`:
+    - Registers user.
+    - Bypasses email verification by directly setting `IsEmailVerified = true` in the InMemory DB.
+    - Logs in to get the JWT.
 
 =====================================================================
 END OF NOTES
