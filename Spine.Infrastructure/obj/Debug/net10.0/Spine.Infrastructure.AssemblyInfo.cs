@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Spine.Infrastructure")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0df0354dcb917aeeb0a69f20b9aa779b580b6e97")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5fbdd57b40de5b703f3a1ebdcafb075c056651b2")]
 [assembly: System.Reflection.AssemblyProductAttribute("Spine.Infrastructure")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Spine.Infrastructure")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
