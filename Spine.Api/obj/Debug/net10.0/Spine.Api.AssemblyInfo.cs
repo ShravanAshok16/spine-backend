@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Spine.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+706b656a60f16e59b4c4b9fdbdc6989c96dc924e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f743a1233b6a5e14bc2073e0b2018725e98c75ed")]
 [assembly: System.Reflection.AssemblyProductAttribute("Spine.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Spine.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
