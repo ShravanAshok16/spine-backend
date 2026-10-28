@@ -13,7 +13,8 @@ public class KafkaProducerService
     {
         var producerConfig = new ProducerConfig
         {
-            BootstrapServers = config?["Kafka:BootstrapServers"] ?? "localhost:9092"
+            BootstrapServers = config?["Kafka:BootstrapServers"] ?? "localhost:9092",
+            AllowAutoCreateTopics = true
         };
 
         _producer = new ProducerBuilder<Null, string>(producerConfig).Build();
@@ -41,5 +42,11 @@ public class KafkaProducerService
 
         var deliveryResult = await _producer.ProduceAsync("user-registered-events", message);
         Console.WriteLine($"Delivered 'user-registered' message to {deliveryResult.TopicPartitionOffset}");
+    }
+
+    public async Task PublishBookFinishedEventAsync(BookFinishedEvent finishedEvent)
+    {
+        var message = new Message<Null, string> { Value = JsonSerializer.Serialize(finishedEvent) };
+        await _producer.ProduceAsync("book-finished-events", message);
     }
 }

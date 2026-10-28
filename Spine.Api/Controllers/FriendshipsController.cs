@@ -32,7 +32,7 @@ public class FriendshipsController : ControllerBase
         if (!targetExists) return NotFound(new { message = "User not found." });
 
         // Check for existing friendship or pending request in either direction
-        var existing = await _db.Friendships.FirstOrDefaultAsync(f => 
+        var existing = await _db.Friendships.FirstOrDefaultAsync(f =>
             (f.RequesterId == userId && f.ReceiverId == targetUserId) ||
             (f.RequesterId == targetUserId && f.ReceiverId == userId));
 
@@ -62,7 +62,7 @@ public class FriendshipsController : ControllerBase
         var userId = GetCurrentUserId();
 
         var friendship = await _db.Friendships.FindAsync(friendshipId);
-        
+
         if (friendship is null || friendship.ReceiverId != userId || friendship.Status != "Pending")
             return NotFound(new { message = "Pending request not found." });
 
@@ -99,7 +99,7 @@ public class FriendshipsController : ControllerBase
         var userId = GetCurrentUserId();
 
         // 1. Verify they are actually friends
-        var isFriend = await _db.Friendships.AnyAsync(f => 
+        var isFriend = await _db.Friendships.AnyAsync(f =>
             f.Status == "Accepted" &&
             ((f.RequesterId == userId && f.ReceiverId == friendId) ||
              (f.ReceiverId == userId && f.RequesterId == friendId)));
@@ -141,6 +141,29 @@ public class FriendshipsController : ControllerBase
             DisplayName = friend.DisplayName,
             Books = books
         });
+    }
+
+    [HttpGet("feed")]
+    public async Task<IActionResult> GetFeed()
+    {
+        var userId = GetCurrentUserId();
+
+        var feed = await _db.Activities
+            .AsNoTracking()
+            .Where(a => a.UserId == userId)
+            .Include(a => a.Book) // Assuming you add a Navigation Property for Book in Activity
+            .OrderByDescending(a => a.CreatedAt)
+            .Take(50)
+            .Select(a => new
+            {
+                a.Id,
+                Action = a.ActionType,
+                BookTitle = a.Book != null ? a.Book.Title : "Unknown",
+                a.CreatedAt
+            })
+            .ToListAsync();
+
+        return Ok(feed);
     }
 
     private Guid GetCurrentUserId()

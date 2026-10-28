@@ -1,9 +1,15 @@
+using Microsoft.EntityFrameworkCore;
 using Resend;
+using Spine.Infrastructure.Data;
 using Spine.Worker;
 using Spine.Worker.Services;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+// The builder automatically loads User Secrets in the Development environment
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+    
 // 1. Configure Resend
 builder.Services.AddOptions();
 builder.Services.AddHttpClient<ResendClient>();

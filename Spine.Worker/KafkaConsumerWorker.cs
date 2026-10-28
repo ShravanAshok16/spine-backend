@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Confluent.Kafka;
+using Microsoft.EntityFrameworkCore; // <-- Make sure this is included
 using Spine.Api.Events;
+using Spine.Core.Entities;
+using Spine.Infrastructure.Data;
 using Spine.Worker.Services;
 
 namespace Spine.Worker;
@@ -9,16 +12,17 @@ public class KafkaConsumerWorker : BackgroundService
 {
     private readonly ILogger<KafkaConsumerWorker> _logger;
     private readonly IConfiguration _config;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceScopeFactory _scopeFactory;
 
+    // Notice: We REMOVED AppDbContext _db and IServiceProvider _serviceProvider
     public KafkaConsumerWorker(
         ILogger<KafkaConsumerWorker> logger,
         IConfiguration config,
-        IServiceProvider serviceProvider)
+        IServiceScopeFactory scopeFactory)
     {
         _logger = logger;
         _config = config;
-        _serviceProvider = serviceProvider;
+        _scopeFactory = scopeFactory;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -28,12 +32,13 @@ public class KafkaConsumerWorker : BackgroundService
             BootstrapServers = _config["Kafka:BootstrapServers"] ?? "localhost:9092",
             GroupId = "spine-email-worker-group",
             AutoOffsetReset = AutoOffsetReset.Earliest,
-            AllowAutoCreateTopics = true 
+            AllowAutoCreateTopics = true
         };
 
         using var consumer = new ConsumerBuilder<Ignore, string>(config).Build();
 
-        var topics = new[] { "password-reset-events", "user-registered-events" };
+        // ADD the new topic here
+        var topics = new[] { "password-reset-events", "user-registered-events", "book-finished-events" };
         consumer.Subscribe(topics);
 
         _logger.LogInformation("Kafka Consumer started. Listening on topics: {Topics}", string.Join(", ", topics));
@@ -42,17 +47,19 @@ public class KafkaConsumerWorker : BackgroundService
         {
             try
             {
-                // 1. Consume the message (this is what throws if the topic is missing)
                 var consumeResult = consumer.Consume(stoppingToken);
                 var topic = consumeResult.Topic;
                 var message = consumeResult.Message.Value;
 
                 _logger.LogInformation("Received message from {Topic}: {Message}", topic, message);
 
-                using var scope = _serviceProvider.CreateScope();
+                // Create a scope for this specific message
+                using var scope = _scopeFactory.CreateScope();
+                
+                // Resolve services from the scope
                 var emailService = scope.ServiceProvider.GetRequiredService<EmailService>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                // 2. Process the message
                 if (topic == "password-reset-events")
                 {
                     var resetEvent = JsonSerializer.Deserialize<PasswordResetRequestedEvent>(message);
@@ -69,21 +76,46 @@ public class KafkaConsumerWorker : BackgroundService
                         await emailService.SendVerificationEmailAsync(registerEvent.Email, registerEvent.Token);
                     }
                 }
+                else if (topic == "book-finished-events")
+                {
+                    var finishEvent = JsonSerializer.Deserialize<BookFinishedEvent>(message);
+                    if (finishEvent != null)
+                    {
+                        // 1. Find all friends of this user
+                        var friendIds = await db.Friendships
+                            .Where(f => (f.RequesterId == finishEvent.UserId || f.ReceiverId == finishEvent.UserId) && f.Status == "Accepted")
+                            .Select(f => f.RequesterId == finishEvent.UserId ? f.ReceiverId : f.RequesterId)
+                            .ToListAsync();
+
+                        // 2. Add an Activity row for the user and all their friends
+                        var feedUsers = friendIds.Append(finishEvent.UserId).ToList();
+
+                        foreach (var feedUserId in feedUsers)
+                        {
+                            var activity = new Activity
+                            {
+                                UserId = feedUserId,
+                                ActionType = "FinishedBook",
+                                BookId = finishEvent.BookId,
+                                CreatedAt = DateTime.UtcNow
+                            };
+                            db.Activities.Add(activity);
+                        }
+                        await db.SaveChangesAsync();
+                    }
+                }
             }
             catch (ConsumeException ex) when (ex.Error.Code == ErrorCode.UnknownTopicOrPart)
             {
-                // The topic doesn't exist yet. Wait for someone to publish to it.
                 _logger.LogWarning("Topic not found yet. Waiting for Kafka to create it...");
                 await Task.Delay(2000, stoppingToken);
             }
             catch (OperationCanceledException)
             {
-                // Graceful shutdown
                 break;
             }
             catch (Exception ex)
             {
-                // Catch any other processing errors so the worker doesn't crash
                 _logger.LogError(ex, "Failed to process message");
             }
         }

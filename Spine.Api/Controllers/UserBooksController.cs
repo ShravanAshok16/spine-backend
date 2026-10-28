@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Spine.Api.Events;
 using Spine.Api.Models;
 using Spine.Api.Services;
 using Spine.Core.Entities;
@@ -15,11 +16,16 @@ public class UserBooksController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly OpenLibraryService _openLibraryService;
+    private readonly KafkaProducerService _kafkaProducer;
 
-    public UserBooksController(AppDbContext db, OpenLibraryService openLibraryService)
+    public UserBooksController(
+        AppDbContext db, 
+        OpenLibraryService openLibraryService,
+        KafkaProducerService kafkaProducer) 
     {
         _db = db;
         _openLibraryService = openLibraryService;
+        _kafkaProducer = kafkaProducer;
     }
 
     [HttpPost]
@@ -28,14 +34,12 @@ public class UserBooksController : ControllerBase
         var userId = GetCurrentUserId();
         var isbn = request.Isbn.Trim();
 
-        // 1. Fetch metadata from Open Library
         var bookData = await _openLibraryService.GetBookByIsbnAsync(isbn);
         if (bookData is null)
             return BadRequest(new { message = "Could not find book details for this ISBN." });
 
-        // 2. Check if the book already exists in our Global Catalog
         var existingBook = await _db.Books.FirstOrDefaultAsync(b => b.Isbn == isbn);
-
+        
         if (existingBook is null)
         {
             existingBook = new Book
@@ -48,17 +52,15 @@ public class UserBooksController : ControllerBase
                 PageCount = bookData.PageCount
             };
             _db.Books.Add(existingBook);
-            await _db.SaveChangesAsync(); // Save to generate the BookId
+            await _db.SaveChangesAsync();
         }
 
-        // 3. Check if the user already has this book
         var alreadyOwned = await _db.UserBooks
             .AnyAsync(ub => ub.UserId == userId && ub.BookId == existingBook.Id);
 
         if (alreadyOwned)
             return BadRequest(new { message = "You already have this book in your library." });
 
-        // 4. Add the book to the user's library
         var userBook = new UserBook
         {
             UserId = userId,
@@ -70,19 +72,14 @@ public class UserBooksController : ControllerBase
         _db.UserBooks.Add(userBook);
         await _db.SaveChangesAsync();
 
-        return Ok(new
-        {
-            message = "Book added to library successfully.",
-            userBookId = userBook.Id,
-            title = existingBook.Title
-        });
+        return Ok(new { message = "Book added to library successfully.", userBookId = userBook.Id, title = existingBook.Title });
     }
 
     [HttpGet]
     public async Task<IActionResult> GetMyLibrary(
-    [FromQuery] string? status = null,
-    [FromQuery] string? search = null,
-    [FromQuery] string sort = "added_desc")
+        [FromQuery] string? status = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string sort = "added_desc")
     {
         var userId = GetCurrentUserId();
 
@@ -92,29 +89,24 @@ public class UserBooksController : ControllerBase
             .Include(ub => ub.Book)
             .AsQueryable();
 
-        // 1. Filter by Status (e.g., only show "Reading")
         if (!string.IsNullOrWhiteSpace(status))
-        {
             query = query.Where(ub => ub.Status.ToLower() == status.ToLower());
-        }
 
-        // 2. Search by Title or Author
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim().ToLower();
-            query = query.Where(ub =>
-                ub.Book.Title.ToLower().Contains(term) ||
+            query = query.Where(ub => 
+                ub.Book.Title.ToLower().Contains(term) || 
                 ub.Book.Author.ToLower().Contains(term));
         }
 
-        // 3. Sorting
         query = sort switch
         {
             "title_asc" => query.OrderBy(ub => ub.Book.Title),
             "title_desc" => query.OrderByDescending(ub => ub.Book.Title),
             "rating_desc" => query.OrderByDescending(ub => ub.PersonalRating),
             "added_asc" => query.OrderBy(ub => ub.AddedAt),
-            _ => query.OrderByDescending(ub => ub.AddedAt) // default: added_desc
+            _ => query.OrderByDescending(ub => ub.AddedAt)
         };
 
         var library = await query
@@ -175,7 +167,8 @@ public class UserBooksController : ControllerBase
 
         if (userBook is null) return NotFound();
 
-        // Only update fields that were provided
+        var previousStatus = userBook.Status;
+
         userBook.Status = request.Status;
         userBook.CurrentPage = request.CurrentPage;
         userBook.PersonalRating = request.PersonalRating;
@@ -183,6 +176,27 @@ public class UserBooksController : ControllerBase
         userBook.LentTo = request.LentTo;
 
         await _db.SaveChangesAsync();
+
+        // If the book was JUST finished, publish to Kafka
+        if (previousStatus != "Finished" && userBook.Status == "Finished")
+        {
+            var user = await _db.Users.FindAsync(userId);
+            var book = await _db.Books.FindAsync(userBook.BookId);
+
+            if (user != null && book != null)
+            {
+                var finishedEvent = new BookFinishedEvent
+                {
+                    UserId = user.Id,
+                    UserDisplayName = user.DisplayName,
+                    BookId = book.Id,
+                    BookTitle = book.Title,
+                    Rating = userBook.PersonalRating
+                };
+                
+                await _kafkaProducer.PublishBookFinishedEventAsync(finishedEvent);
+            }
+        }
 
         return NoContent();
     }
@@ -192,9 +206,9 @@ public class UserBooksController : ControllerBase
         var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
                ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
-        if (string.IsNullOrEmpty(sub))
+        if (string.IsNullOrEmpty(sub)) 
             throw new UnauthorizedAccessException("User identity not found in token.");
 
-        return Guid.Parse(sub);
+        return Guid.Parse(sub); 
     }
 }

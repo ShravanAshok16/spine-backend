@@ -2,34 +2,34 @@
 
 A production-grade, event-driven REST API for tracking physical book collections, sharing libraries with friends, and discovering new books.
 
-🌐 **Live API:** *(Coming in Sprint 6)*  
-💻 **Frontend Repo:** *(Coming in Sprint 5)*
+🌐 **Live API:** *(Coming in Sprint 7)*  
+💻 **Frontend Repo:** *(Coming in Sprint 7)*
 
 ---
 
 ## 📌 Current Status
 
-**Phase:** Sprint 4 — Core Library & Reviews Complete
-**Progress:** `[████████░░] 80%` (Backend)
+**Phase:** Backend Complete — Ready for Frontend
+**Progress:** `[██████████] 100%` (Backend MVP)
 
 ### ✅ Done
-- **Architecture:** Clean Architecture with `Spine.Api`, `Spine.Core`, `Spine.Infrastructure`, `Spine.Worker`, and `Spine.Tests`.
-- **Database:** 9 core entities with Global Catalog pattern, Self-referencing Graph (Friendships), and custom tags.
-- **Authentication:** JWT Auth, BCrypt hashing, Account Management, and Email Verification enforcement.
-- **Event-Driven:** Apache Kafka Producer and Background Consumer Worker.
-- **Email:** Resend API integration for actual HTML email delivery (Password Reset & Verification).
-- **Testing:** 9 passing Integration Tests using InMemory DB and Mock Kafka.
-- **External APIs:** Open Library integration (fetching metadata, covers, authors, and descriptions by ISBN).
-- **Library Management:** Add books to personal library, track current page, update reading status (Unread, Reading, Finished, DNF), and write private notes.
-- **Reviews:** Users can leave public 1-5 star reviews and text.
+- Solution architecture created: `Spine.Api`, `Spine.Core`, `Spine.Infrastructure`, `Spine.Tests`, `Spine.Worker`.
+- **Database Schema Designed:** Created 9 core entities and configured the `AppDbContext` with relationships and indexes.
+- **JWT Authentication:** Register, Login (Email or DisplayName), and Account Management (Update Profile, Email, Password).
+- **Email Verification:** Uses Kafka and Resend to send verification links. Users cannot log in until verified.
+- **Password Reset:** Event-driven reset flow (API -> Kafka -> Worker -> Email).
+- **Integration Tests:** 9 tests passing (Auth, Account Management, JWT Authorization).
+- **Open Library Integration:** Fetch book metadata (Title, Author, Cover, Description, Page Count) by ISBN.
+- **Global Catalog:** Deduplicates books across users in the database.
+- **Library Management:** Users can add books to their personal library, update reading progress, and track status.
+- **Reviews System:** Users can leave a 1-5 star public rating and written review for any book.
+- **Social Layer (Friendships):** Send, accept, and view friends.
+- **Privacy Enforcement:** Friends can only view a user's library if their privacy setting is `FriendsOnly` or `Public`.
+- **Activity Feed (Kafka):** When a user finishes a book, an event is published. The Worker writes a feed entry for the user and all their friends.
+- **Background Worker:** `Spine.Worker` consumes Kafka topics and handles emails and activity feed fan-out.
 
 ### 🚧 In Progress
-- Sprint 5: The Social Layer (Friendships & Privacy Settings).
-
-### 📝 Next Up
-- Send/Accept friend requests.
-- View friends' libraries based on privacy settings.
-- Activity Feed generation.
+- Preparing for Sprint 7: React Web Frontend, AI Chatbot, and Mobile App.
 
 ---
 
@@ -53,25 +53,25 @@ The database is designed using a **Global Catalog** pattern to prevent duplicati
 
 ## 🏗️ Project Structure
 
-### Backend Architecture
-
 ```text
 Spine/
 ├── Spine.Api/                  # HTTP endpoints, controllers, DTOs, Services
-│   ├── Controllers/            # Auth, Account, UserBooks, Books, Reviews
+│   ├── Controllers/            # Auth, Account, UserBooks, Books, Reviews, Friendships
 │   ├── Models/                 # DTOs
 │   ├── Services/               # TokenService, KafkaProducerService, OpenLibraryService
-│   ├── Events/                 # Event DTOs (PasswordReset, UserRegistered)
-│   ├── Validators/             # FluentValidation
+│   ├── Events/                 # Event DTOs (PasswordReset, UserRegistered, BookFinished)
+│   ├── Validators/             # FluentValidation rules
 │   └── Program.cs
-├── Spine.Core/                 # Domain entities (no external dependencies)
+├── Spine.Core/                 # Domain entities
 │   └── Entities/
 ├── Spine.Infrastructure/       # EF Core, DbContext, Migrations
 │   ├── Data/
 │   └── Migrations/
 ├── Spine.Worker/               # Background service (Kafka Consumer)
+│   ├── Services/               # EmailService (Resend)
 │   └── KafkaConsumerWorker.cs
-├── Spine.Tests/                # Unit & Integration tests
+├── Spine.Tests/                # Integration tests
+│   └── Integration/
 ├── docker-compose.yml          # Local Kafka & Kafka-UI setup
 └── README.md
 

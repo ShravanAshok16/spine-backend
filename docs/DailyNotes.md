@@ -3,7 +3,7 @@ SPINE API — DAILY NOTES, SETUP & RETROSPECTIVE
 =====================================================================
 Author: Shravan Ashok
 Project: Spine (Book Library & Social Tracker)
-Coverage: Sprint 1 through Sprint 4
+Coverage: Sprint 1 through Sprint 6 (Backend Complete)
 =====================================================================
 
 
@@ -22,10 +22,12 @@ Run these in the root `Spine` folder:
   dotnet user-secrets init --project Spine.Api
   dotnet user-secrets set "ConnectionStrings:Default" "Host=...;Database=neondb;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true" --project Spine.Api
   dotnet user-secrets set "Jwt:Key" "thisIsMySuperSecretJwtKeyForSpineApp_ChangeMe_12345" --project Spine.Api
+  
+  dotnet user-secrets init --project Spine.Worker
+  dotnet user-secrets set "ConnectionStrings:Default" "Host=...;Database=neondb;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true" --project Spine.Worker
   dotnet user-secrets set "Resend:ApiKey" "re_YOUR_API_KEY" --project Spine.Worker
 
 --- 0.3 Start Kafka ---
-We use Docker to run a local Kafka broker and UI.
   docker compose up -d
 Access Kafka UI at: http://localhost:8080
 
@@ -33,7 +35,6 @@ Access Kafka UI at: http://localhost:8080
   dotnet ef database update --project Spine.Infrastructure --startup-project Spine.Api
 
 --- 0.5 Run the Application ---
-Because of Event-Driven Architecture, you need TWO terminals:
 Terminal 1 (API):    dotnet run --project Spine.Api
 Terminal 2 (Worker): dotnet run --project Spine.Worker
 
@@ -44,101 +45,116 @@ PART 1 — SPRINT 1: DATABASE & AUTHENTICATION
 
 --- Day 1: Database Schema & Foundation ---
 Key Architectural Decisions:
-1. **Global Catalog Pattern:** We created a `Books` table (Global) and a `UserBooks` table (Join). This prevents saving "Harry Potter" 1,000 times for 1,000 users. It's saved once, and users link to it.
-2. **Soft Deletes:** `UserBooks` has `IsDeleted` and `DeletedAt`. We never hard-delete user data immediately.
-3. **Self-Referencing Graph:** The `Friendships` table has TWO foreign keys to `Users` (`RequesterId` and `ReceiverId`). We used `DeleteBehavior.Restrict` so deleting a user doesn't cascade delete their friends.
-4. **Many-to-Many:** `Tags` to `UserBooks` requires an automatic join table (`UserBookTags`).
+1. **Global Catalog Pattern:** `Books` table (Global) and `UserBooks` (Join). "Harry Potter" is saved ONCE. Users link to it.
+2. **Soft Deletes:** `UserBooks` has `IsDeleted`. Never hard-delete user data immediately.
+3. **Self-Referencing Graph:** `Friendships` has TWO FKs to `Users` (`RequesterId`, `ReceiverId`). We used `DeleteBehavior.Restrict` so deleting a user doesn't cascade delete their friends.
+4. **Many-to-Many:** `Tags` to `UserBooks` requires `UserBookTags`.
 
 --- Day 2 & 3: Auth & Account Management ---
-Key Architectural Decisions:
-1. **JWT:** Stateless auth. Claims: `sub` (UserId), `email`.
-2. **Login via Email OR Username:** We changed the `LoginRequest` to use `Identifier` and check `u.Email == identifier || u.DisplayName.ToLower() == identifier`.
-3. **FluentValidation:** Kept validation strictly to *formatting*. Database checks (like "is this email already taken?") were moved into the Controller because the auto-validation pipeline is synchronous and cannot handle async database calls.
+Key Decisions:
+1. **JWT Auth:** Stateless. Claims: `sub` (UserId), `email`.
+2. **Login Identifier:** Login accepts either Email OR DisplayName.
+3. **FluentValidation:** Kept strictly to *formatting*. Database checks (like "is this email taken?") were moved to the Controller because the auto-validation pipeline is synchronous and crashes on async DB calls.
+
+--- Day 4: Email Verification ---
+- When a user registers, `IsEmailVerified` is set to false.
+- `AuthController` publishes a `UserRegisteredEvent` to Kafka.
+- The user cannot login until they verify their email.
 
 
 =====================================================================
-PART 2 — SPRINT 2: EVENT-DRIVEN ARCHITECTURE & EMAILS
+PART 2 — SPRINT 2: KAFKA & EMAILS
 =====================================================================
 
---- Day 1–4: Kafka, Resend, and Email Verification ---
+--- Kafka & Resend Integration ---
 Why Event-Driven?
-If the API sends an email synchronously, the user waits 2–3 seconds. If Resend is down, the request crashes. 
-With Kafka:
-1. API saves token to DB.
-2. API drops a JSON message in Kafka and returns `200 OK` instantly.
-3. `Spine.Worker` reads Kafka and sends the email.
+Synchronous emails block the API thread. If Resend is slow, the API hangs.
+With Kafka: API drops a message and returns instantly. The Worker handles the email.
 
-Key Features:
 - **Producer:** `KafkaProducerService` publishes to `password-reset-events` and `user-registered-events`.
-- **Consumer:** `Spine.Worker` listens to both topics.
-- **Email Verification:** Users cannot log in until they click the link in the email sent by Resend.
-- **Resend Sandbox:** On the free tier, you can only send emails to the email address you used to sign up for Resend.
+- **Consumer:** `Spine.Worker` listens to both topics and calls `EmailService`.
+- **Email Service:** Uses Resend API. Note: Resend's sandbox restricts sending to the email you signed up with.
 
 
 =====================================================================
-PART 3 — SPRINT 3 & 4: EXTERNAL APIS & LIBRARY MANAGEMENT
+PART 3 — SPRINT 3 & 4: LIBRARY & EXTERNAL APIS
 =====================================================================
 
---- Day 1–2: Open Library Integration ---
-- **OpenLibraryService:** Calls `https://openlibrary.org/isbn/{isbn}.json`.
-- **The 3-Call Problem:** Open Library splits its data. To get Title + Author + Description, we had to make 3 HTTP calls (1 for the book, 1 for the author key, 1 for the work key).
-- **Adding a Book:** `POST /api/UserBooks` takes an ISBN, checks if the `Book` exists in our Global Catalog. If not, it saves it. Then it links it to the user in `UserBooks`.
+--- Open Library Integration ---
+- **The 3-Call Problem:** Open Library splits data. To get Title + Author + Description, we call `/isbn/...`, then `/authors/...`, then `/works/...`.
+- **Adding a Book:** `POST /api/UserBooks` checks the Global Catalog first. Only fetches from Open Library if the book doesn't exist.
 
---- Day 3–4: Library Management & Reviews ---
-- **GET /api/UserBooks:** Supports filtering (`?status=Reading`), searching (`?search=hobbit`), and sorting (`?sort=title_asc`).
-- **PUT /api/UserBooks/{id}:** Updates `Status`, `CurrentPage`, `PersonalRating` (1-5 int), `PrivateNotes`, and `LentTo`.
-- **Reviews:** Users can post a 1-5 star review. The API calculates the `AverageRating` for the book using LINQ `Average()`.
+--- Library Management ---
+- **GET /api/UserBooks:** Supports `?status=Reading`, `?search=`, and `?sort=title_asc`.
+- **PUT /api/UserBooks/{id}:** Updates `Status`, `CurrentPage`, `PersonalRating`, `PrivateNotes`, and `LentTo`.
 
 
 =====================================================================
-PART 4 — PROBLEMS FACED AND HOW WE FIXED THEM
+PART 4 — SPRINT 5 & 6: SOCIAL LAYER & ACTIVITY FEED
 =====================================================================
 
-1. **FluentValidation Error: `AsyncValidatorInvokedSynchronouslyException`**
-   - Cause: Used `.MustAsync()` to check DB for existing emails.
-   - Fix: Removed it from the Validator. Moved the DB check to `AuthController` using `await _db.Users.AnyAsync(...)`.
+--- Friendships & Privacy (Sprint 5) ---
+- **The Graph:** When User A requests User B, `RequesterId = A`, `ReceiverId = B`, `Status = "Pending"`. When accepted, `Status = "Accepted"`.
+- **Privacy Enforcement:** `GET /api/Friendships/{friendId}/library` checks:
+  1. Are they friends? (If no -> 403 Forbidden).
+  2. Is the friend's `PrivacySetting` "Private"? (If yes -> 403 Forbidden).
+  3. If allowed, return books BUT set `PrivateNotes = null`. (Friends shouldn't see private notes).
 
-2. **Test Error: `Npgsql` and `InMemory` providers registered together**
-   - Cause: `WebApplicationFactory` registered both the real DB and the test DB.
-   - Fix: Added `if (!builder.Environment.IsEnvironment("Testing"))` around the Npgsql registration in `Program.cs`.
-
-3. **Test Error: `Register 200` followed by `Login 401`**
-   - Cause: `options.UseInMemoryDatabase("Db_" + Guid.NewGuid())` created a fresh DB for every request.
-   - Fix: Captured the DB name *outside* the lambda: `var dbName = "Db_" + Guid.NewGuid();`.
-
-4. **Test Error: Kafka Hangs for 2 minutes**
-   - Cause: The tests tried to connect to `localhost:9092`, which wasn't running.
-   - Fix: Created `MockKafkaProducerService` and used `services.RemoveAll` / `AddSingleton` in the test factory to swap the real Kafka service for the mock. Also marked the real methods as `virtual`.
-
-5. **Test Error: `MockKafkaProducerService` NullReferenceException**
-   - Cause: The mock called `base(null!)`, causing the base constructor to crash when trying to read `config["..."]`.
-   - Fix: Changed the base constructor to use `config?["..."]` to handle null gracefully.
-
-6. **Kafka Worker Error: `Subscribed topic not available`**
-   - Cause: The Worker started before the topics (`user-registered-events`) were created by the API.
-   - Fix: Moved `consumer.Consume()` inside the `try` block and caught `ConsumeException` when `ex.Error.Code == ErrorCode.UnknownTopicOrPart`. Added a 2-second delay and retry.
-
-7. **Resend Error: `You can only send testing emails to your own email address`**
-   - Cause: Resend's free sandbox restricts sending to any email other than the signup email.
-   - Fix: Register a user using the exact email used to sign up for Resend. (For production, a custom domain must be verified).
-
-8. **Build Error: `GetCurrentUserId` does not exist**
-   - Cause: Pasted the protected `AccountController` code into `AuthController` (which has no `[Authorize]`).
-   - Fix: Moved the helper method back to the correct controller.
-
-9. **README File Encoding (Mojibake)**
-   - Cause: Saving with Windows-1252 turned emojis into gibberish.
-   - Fix: In VS Code, changed encoding to UTF-8 (bottom right).
+--- Activity Feed (Sprint 6) ---
+- **The Fan-Out:** When User A finishes a book, the API publishes a `BookFinishedEvent` to Kafka.
+- **The Worker:** Reads the event, finds all of User A's friends, and inserts a new `Activity` row for the user AND every friend.
+- **The DB Context Issue:** Because the Worker is a Singleton `BackgroundService`, it cannot inject `AppDbContext` (Scoped). We must use `IServiceScopeFactory` to create a scope for every message.
 
 
 =====================================================================
-PART 5 — WHAT WENT WELL & KEY TAKEAWAYS
+PART 5 — PROBLEMS FACED AND HOW WE FIXED THEM
 =====================================================================
 
-- **Architecture:** The separation of `Spine.Api` and `Spine.Worker` works perfectly. It's a real-world microservice pattern.
-- **Resilience:** Even if Resend goes down, the API returns 200 OK, and the message is safe in Kafka.
-- **Testing:** The integration tests caught several bugs before they hit production.
-- **External APIs:** We learned how to normalize messy third-party data (Open Library) into our own DTOs.
+1. **FluentValidation Async Error**
+   - Cause: `.MustAsync()` checking DB.
+   - Fix: Removed from Validator. Moved to Controller.
+
+2. **Tests: Npgsql & InMemory clash**
+   - Cause: Both registered in `WebApplicationFactory`.
+   - Fix: Added `if (!builder.Environment.IsEnvironment("Testing"))` in `Program.cs`.
+
+3. **Tests: Fresh DB on every request**
+   - Cause: `Guid.NewGuid()` inside the options lambda.
+   - Fix: Captured DB name OUTSIDE the lambda.
+
+4. **Tests: Kafka 2-minute hang**
+   - Cause: Tests tried to connect to `localhost:9092`.
+   - Fix: Created `MockKafkaProducerService` (marked real methods `virtual`) and injected it via `services.RemoveAll`.
+
+5. **Kafka Worker Crash: Topic not found**
+   - Cause: Worker starts before the topic exists.
+   - Fix: Caught `ConsumeException` (UnknownTopicOrPart) inside the `while` loop and added `await Task.Delay(2000)`.
+
+6. **Resend Sandbox Error**
+   - Cause: Trying to send to an email other than the Resend signup email.
+   - Fix: Use the Resend email for testing.
+
+7. **Worker: ConnectionString not initialized**
+   - Cause: `dotnet watch` ran from root, Worker didn't find `appsettings.json`.
+   - Fix: Used `dotnet user-secrets` on the `Spine.Worker` project and removed the direct `AppDbContext` injection in favor of `IServiceScopeFactory`.
+
+8. **Build Error: `GetCurrentUserId` missing**
+   - Cause: Helper method was accidentally pasted into the wrong controller.
+   - Fix: Moved it to the correct class.
+
+9. **README Encoding (Mojibake)**
+   - Cause: Saved as Windows-1252.
+   - Fix: Switched to UTF-8 in VS Code.
+
+
+=====================================================================
+PART 6 — WHAT WENT WELL
+=====================================================================
+- **Architecture:** `Spine.Api` and `Spine.Worker` are perfectly decoupled.
+- **Resilience:** If Resend goes down, the API stays up, and Kafka holds the message.
+- **Testing:** 9 integration tests caught crucial bugs (like the DB reset and Kafka hang).
+- **Data Integrity:** The Global Catalog saves massive amounts of DB space.
+- **Social Logic:** Implemented a true Graph relationship with strict privacy rules.
 
 =====================================================================
 END OF NOTES
