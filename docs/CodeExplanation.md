@@ -16,7 +16,8 @@ PART 1 — DOMAIN ENTITIES & DB CONTEXT
 
 --- Spine.Core/Entities/Book.cs ---
   - The Global Catalog.
-  - Key fields: Id, Isbn, Title, Author, CoverUrl, Description.
+  - Key fields: Id, Isbn, Title, Author, CoverUrl, Description, PageCount, 
+    Language, Genres.
 
 --- Spine.Core/Entities/UserBook.cs ---
   - The Join table (Personal Library).
@@ -71,13 +72,15 @@ PART 3 — KAFKA & THE WORKER
   - `PublishPasswordResetEventAsync()` -> topic: `password-reset-events`.
   - `PublishUserRegisteredEventAsync()` -> topic: `user-registered-events`.
   - `PublishBookFinishedEventAsync()` -> topic: `book-finished-events`.
+  - `PublishContactFormEventAsync()` -> topic: `contact-form-events`.
   - Marked as `virtual` so we can mock it in tests.
 
 --- Spine.Worker/KafkaConsumerWorker.cs ---
   - Inherits `BackgroundService`.
-  - Subscribes to all three topics.
+  - Subscribes to all four topics.
   - **The Singleton/Scoped Fix:** Injects `IServiceScopeFactory`. Inside the loop, uses `scope.ServiceProvider.GetRequiredService<AppDbContext>()` to get the DB.
   - **The Topic Error Fix:** Wraps `consumer.Consume()` in a `try/catch (ConsumeException)` to handle "Topic not found" gracefully.
+  - **Contact Form:** Logs the contact message (in production, sends an email to you).
 
 --- Spine.Worker/Services/EmailService.cs ---
   - Uses `IResend`.
@@ -92,20 +95,25 @@ PART 4 — EXTERNAL APIS & LIBRARY MANAGEMENT
   - `GetBookByIsbnAsync()`:
     1. Calls `/isbn/{isbn}.json`.
     2. Calls `/authors/{key}.json` for Author.
-    3. Calls `/works/{key}.json` for Description.
-  - Returns a clean `BookSearchResultDto`.
+    3. Calls `/works/{key}.json` for Description/Genres.
+  - **Fallback:** `EnrichWithGoogleBooksAsync()` is called if any field is missing.
+  - **Language:** Uses Unicode character detection for Kannada (`kn`), Telugu (`te`), and Tamil (`ta`).
 
 --- Spine.Api/Controllers/UserBooksController.cs ---
   - `POST /`: Checks Global Catalog. Saves Book if new. Links to User.
-  - `GET /`: Supports `?status=`, `?search=`, `?sort=`.
+  - `POST /manual`: Allows manual book entry for regional books not found in APIs.
+  - `GET /`: Supports `?status=`, `?search=`, `?language=`, `?genre=`, `?tag=`, `?sort=`.
   - `PUT /{id}`:
-    - Saves old status.
-    - Updates fields.
+    - Includes `.Include(ub => ub.Book)` to access `PageCount`.
+    - Auto-completes `CurrentPage` if status is "Finished".
     - If `oldStatus != "Finished" && newStatus == "Finished"`, publishes `BookFinishedEvent` to Kafka.
 
 --- Spine.Api/Controllers/ReviewsController.cs ---
   - `POST /book/{bookId}`: Creates a review.
   - `GET /book/{bookId}`: Returns all reviews and `AverageRating` (using LINQ `Average()`).
+
+--- Spine.Api/Controllers/ContactController.cs ---
+  - `POST /`: Accepts a `ContactRequest` and publishes a `ContactFormSubmittedEvent` to Kafka.
 
 
 =====================================================================

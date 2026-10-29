@@ -88,6 +88,13 @@ PART 3 — SPRINT 3 & 4: LIBRARY & EXTERNAL APIS
 - **GET /api/UserBooks:** Supports `?status=Reading`, `?search=`, and `?sort=title_asc`.
 - **PUT /api/UserBooks/{id}:** Updates `Status`, `CurrentPage`, `PersonalRating`, `PrivateNotes`, and `LentTo`.
 
+--- Day 5 (Finalization): Resilience & Regional Support ---
+- **Google Books Fallback:** If Open Library is missing Author, Description, Genres, PageCount, or Cover, we query Google Books API to fill in the blanks.
+- **Language Detection:** We detect Kannada, Telugu, and Tamil using Unicode character ranges in the title, and fall back to English.
+- **Manual Entry:** Added `POST /api/UserBooks/manual` for regional books that lack ISBNs in external APIs.
+- **Auto-Complete Pages:** If a book is marked "Finished", `CurrentPage` auto-snaps to `TotalPages`.
+- **Contact Form:** Built `ContactController` and published a `ContactFormSubmittedEvent` to Kafka.
+
 
 =====================================================================
 PART 4 — SPRINT 5 & 6: SOCIAL LAYER & ACTIVITY FEED
@@ -146,6 +153,14 @@ PART 5 — PROBLEMS FACED AND HOW WE FIXED THEM
    - Cause: Saved as Windows-1252.
    - Fix: Switched to UTF-8 in VS Code.
 
+10. **JWT Error: `IDX10208: Unable to validate audience`**
+    - Cause: `appsettings.json` was missing the `Jwt:Audience` string, and `TokenService` wasn't adding the `aud` claim.
+    - Fix: Added `"Audience": "SpineClient"` to `appsettings.json` and `audience: _config["Jwt:Audience"]` to the token generator.
+
+11. **GitHub Push Protection: Resend API Key Blocked**
+    - Cause: The real API key was inside `bin/Debug/appsettings.json` and tracked by Git.
+    - Fix: Ran `git rm -r --cached` on all `bin/` and `obj/` folders, ensured `.gitignore` was correct, and committed the cleanup.
+
 
 =====================================================================
 PART 6 — WHAT WENT WELL
@@ -155,6 +170,7 @@ PART 6 — WHAT WENT WELL
 - **Testing:** 9 integration tests caught crucial bugs (like the DB reset and Kafka hang).
 - **Data Integrity:** The Global Catalog saves massive amounts of DB space.
 - **Social Logic:** Implemented a true Graph relationship with strict privacy rules.
+- **External APIs:** Handled missing data from Open Library by falling back to Google Books.
 
 =====================================================================
 END OF NOTES

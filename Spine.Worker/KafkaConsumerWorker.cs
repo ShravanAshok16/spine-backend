@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Confluent.Kafka;
-using Microsoft.EntityFrameworkCore; // <-- Make sure this is included
+using Microsoft.EntityFrameworkCore;
 using Spine.Api.Events;
 using Spine.Core.Entities;
 using Spine.Infrastructure.Data;
@@ -14,7 +14,6 @@ public class KafkaConsumerWorker : BackgroundService
     private readonly IConfiguration _config;
     private readonly IServiceScopeFactory _scopeFactory;
 
-    // Notice: We REMOVED AppDbContext _db and IServiceProvider _serviceProvider
     public KafkaConsumerWorker(
         ILogger<KafkaConsumerWorker> logger,
         IConfiguration config,
@@ -37,8 +36,8 @@ public class KafkaConsumerWorker : BackgroundService
 
         using var consumer = new ConsumerBuilder<Ignore, string>(config).Build();
 
-        // ADD the new topic here
-        var topics = new[] { "password-reset-events", "user-registered-events", "book-finished-events" };
+        // 🔥 ADD "contact-form-events" HERE
+        var topics = new[] { "password-reset-events", "user-registered-events", "book-finished-events", "contact-form-events" };
         consumer.Subscribe(topics);
 
         _logger.LogInformation("Kafka Consumer started. Listening on topics: {Topics}", string.Join(", ", topics));
@@ -53,10 +52,8 @@ public class KafkaConsumerWorker : BackgroundService
 
                 _logger.LogInformation("Received message from {Topic}: {Message}", topic, message);
 
-                // Create a scope for this specific message
                 using var scope = _scopeFactory.CreateScope();
                 
-                // Resolve services from the scope
                 var emailService = scope.ServiceProvider.GetRequiredService<EmailService>();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
@@ -81,13 +78,11 @@ public class KafkaConsumerWorker : BackgroundService
                     var finishEvent = JsonSerializer.Deserialize<BookFinishedEvent>(message);
                     if (finishEvent != null)
                     {
-                        // 1. Find all friends of this user
                         var friendIds = await db.Friendships
                             .Where(f => (f.RequesterId == finishEvent.UserId || f.ReceiverId == finishEvent.UserId) && f.Status == "Accepted")
                             .Select(f => f.RequesterId == finishEvent.UserId ? f.ReceiverId : f.RequesterId)
                             .ToListAsync();
 
-                        // 2. Add an Activity row for the user and all their friends
                         var feedUsers = friendIds.Append(finishEvent.UserId).ToList();
 
                         foreach (var feedUserId in feedUsers)
@@ -102,6 +97,17 @@ public class KafkaConsumerWorker : BackgroundService
                             db.Activities.Add(activity);
                         }
                         await db.SaveChangesAsync();
+                    }
+                }
+                // 🔥 ADD THIS BLOCK FOR CONTACT FORM
+                else if (topic == "contact-form-events")
+                {
+                    var contactEvent = JsonSerializer.Deserialize<ContactFormSubmittedEvent>(message);
+                    if (contactEvent != null)
+                    {
+                        // In a real app, you'd send this to your own email address.
+                        _logger.LogInformation("NEW CONTACT FORM from {Name} ({Email}): {Message}", 
+                            contactEvent.Name, contactEvent.Email, contactEvent.Message);
                     }
                 }
             }

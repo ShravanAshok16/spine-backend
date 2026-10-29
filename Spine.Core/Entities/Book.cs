@@ -12,4 +12,6 @@ public class Book
     public Guid? SeriesId { get; set; }
     public Series? Series { get; set; }
     public int? SeriesPosition { get; set; }
+    public string? Genres { get; set; }
+    public string? Language { get; set; }
 }

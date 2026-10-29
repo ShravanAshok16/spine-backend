@@ -19,9 +19,9 @@ public class UserBooksController : ControllerBase
     private readonly KafkaProducerService _kafkaProducer;
 
     public UserBooksController(
-        AppDbContext db, 
+        AppDbContext db,
         OpenLibraryService openLibraryService,
-        KafkaProducerService kafkaProducer) 
+        KafkaProducerService kafkaProducer)
     {
         _db = db;
         _openLibraryService = openLibraryService;
@@ -39,7 +39,7 @@ public class UserBooksController : ControllerBase
             return BadRequest(new { message = "Could not find book details for this ISBN." });
 
         var existingBook = await _db.Books.FirstOrDefaultAsync(b => b.Isbn == isbn);
-        
+
         if (existingBook is null)
         {
             existingBook = new Book
@@ -49,7 +49,9 @@ public class UserBooksController : ControllerBase
                 Author = bookData.Author,
                 CoverUrl = bookData.CoverUrl,
                 Description = bookData.Description,
-                PageCount = bookData.PageCount
+                PageCount = bookData.PageCount,
+                Language = bookData.Language, // <-- Added
+                Genres = bookData.Genres      // <-- Added
             };
             _db.Books.Add(existingBook);
             await _db.SaveChangesAsync();
@@ -79,6 +81,9 @@ public class UserBooksController : ControllerBase
     public async Task<IActionResult> GetMyLibrary(
         [FromQuery] string? status = null,
         [FromQuery] string? search = null,
+        [FromQuery] string? language = null, 
+        [FromQuery] string? genre = null,    
+        [FromQuery] string? tag = null,
         [FromQuery] string sort = "added_desc")
     {
         var userId = GetCurrentUserId();
@@ -89,17 +94,28 @@ public class UserBooksController : ControllerBase
             .Include(ub => ub.Book)
             .AsQueryable();
 
+        // 1. Filters
         if (!string.IsNullOrWhiteSpace(status))
             query = query.Where(ub => ub.Status.ToLower() == status.ToLower());
 
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim().ToLower();
-            query = query.Where(ub => 
-                ub.Book.Title.ToLower().Contains(term) || 
+            query = query.Where(ub =>
+                ub.Book.Title.ToLower().Contains(term) ||
                 ub.Book.Author.ToLower().Contains(term));
         }
 
+        if (!string.IsNullOrWhiteSpace(language))
+            query = query.Where(ub => ub.Book.Language == language);
+
+        if (!string.IsNullOrWhiteSpace(genre))
+            query = query.Where(ub => ub.Book.Genres != null && ub.Book.Genres.ToLower().Contains(genre.ToLower()));
+
+        if (!string.IsNullOrWhiteSpace(tag))
+            query = query.Where(ub => ub.Tags.Any(t => t.Name.ToLower() == tag.ToLower()));
+
+        // 2. Sorting
         query = sort switch
         {
             "title_asc" => query.OrderBy(ub => ub.Book.Title),
@@ -109,6 +125,7 @@ public class UserBooksController : ControllerBase
             _ => query.OrderByDescending(ub => ub.AddedAt)
         };
 
+        // 3. Projection
         var library = await query
             .Select(ub => new UserBookResponse
             {
@@ -119,6 +136,9 @@ public class UserBooksController : ControllerBase
                 CoverUrl = ub.Book.CoverUrl,
                 Status = ub.Status,
                 CurrentPage = ub.CurrentPage,
+                TotalPages = ub.Book.PageCount, // <-- Added
+                Language = ub.Book.Language,    // <-- Added
+                Genres = ub.Book.Genres,        // <-- Added
                 PersonalRating = ub.PersonalRating,
                 PrivateNotes = ub.PrivateNotes,
                 LentTo = ub.LentTo,
@@ -150,6 +170,9 @@ public class UserBooksController : ControllerBase
             CoverUrl = userBook.Book.CoverUrl,
             Status = userBook.Status,
             CurrentPage = userBook.CurrentPage,
+            TotalPages = userBook.Book.PageCount, // <-- Added
+            Language = userBook.Book.Language,    // <-- Added
+            Genres = userBook.Book.Genres,        // <-- Added
             PersonalRating = userBook.PersonalRating,
             PrivateNotes = userBook.PrivateNotes,
             LentTo = userBook.LentTo,
@@ -162,7 +185,9 @@ public class UserBooksController : ControllerBase
     {
         var userId = GetCurrentUserId();
 
+        // 🔥 FIX: Added .Include(ub => ub.Book)
         var userBook = await _db.UserBooks
+            .Include(ub => ub.Book)
             .FirstOrDefaultAsync(ub => ub.Id == id && ub.UserId == userId && !ub.IsDeleted);
 
         if (userBook is null) return NotFound();
@@ -170,18 +195,26 @@ public class UserBooksController : ControllerBase
         var previousStatus = userBook.Status;
 
         userBook.Status = request.Status;
-        userBook.CurrentPage = request.CurrentPage;
         userBook.PersonalRating = request.PersonalRating;
         userBook.PrivateNotes = request.PrivateNotes;
         userBook.LentTo = request.LentTo;
 
+        // Auto-complete page count if finished
+        if (request.Status == "Finished" && userBook.Book.PageCount.HasValue)
+        {
+            userBook.CurrentPage = userBook.Book.PageCount.Value;
+        }
+        else
+        {
+            userBook.CurrentPage = request.CurrentPage;
+        }
+
         await _db.SaveChangesAsync();
 
-        // If the book was JUST finished, publish to Kafka
         if (previousStatus != "Finished" && userBook.Status == "Finished")
         {
             var user = await _db.Users.FindAsync(userId);
-            var book = await _db.Books.FindAsync(userBook.BookId);
+            var book = userBook.Book;
 
             if (user != null && book != null)
             {
@@ -193,7 +226,7 @@ public class UserBooksController : ControllerBase
                     BookTitle = book.Title,
                     Rating = userBook.PersonalRating
                 };
-                
+
                 await _kafkaProducer.PublishBookFinishedEventAsync(finishedEvent);
             }
         }
@@ -201,14 +234,47 @@ public class UserBooksController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("manual")]
+    public async Task<IActionResult> AddBookManually([FromBody] AddBookManuallyRequest request)
+    {
+        var userId = GetCurrentUserId();
+
+        var book = new Book
+        {
+            Title = request.Title,
+            Author = request.Author,
+            Language = request.Language,
+            Isbn = request.Isbn,
+            Description = request.Description,
+            PageCount = request.PageCount,
+            Genres = request.Genres
+        };
+
+        _db.Books.Add(book);
+        await _db.SaveChangesAsync();
+
+        var userBook = new UserBook
+        {
+            UserId = userId,
+            BookId = book.Id,
+            Status = "Unread",
+            AddedAt = DateTime.UtcNow
+        };
+
+        _db.UserBooks.Add(userBook);
+        await _db.SaveChangesAsync();
+
+        return Ok(new { message = "Book added manually.", bookId = book.Id });
+    }
+
     private Guid GetCurrentUserId()
     {
         var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
                ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
-        if (string.IsNullOrEmpty(sub)) 
+        if (string.IsNullOrEmpty(sub))
             throw new UnauthorizedAccessException("User identity not found in token.");
 
-        return Guid.Parse(sub); 
+        return Guid.Parse(sub);
     }
 }

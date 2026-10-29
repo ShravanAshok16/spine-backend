@@ -49,4 +49,15 @@ public class KafkaProducerService
         var message = new Message<Null, string> { Value = JsonSerializer.Serialize(finishedEvent) };
         await _producer.ProduceAsync("book-finished-events", message);
     }
+
+    public virtual async Task PublishContactFormEventAsync(ContactFormSubmittedEvent contactEvent)
+    {
+        var message = new Message<Null, string>
+        {
+            Value = JsonSerializer.Serialize(contactEvent)
+        };
+
+        var deliveryResult = await _producer.ProduceAsync("contact-form-events", message);
+        Console.WriteLine($"Delivered 'contact-form' message to {deliveryResult.TopicPartitionOffset}");
+    }
 }

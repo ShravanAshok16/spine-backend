@@ -15,21 +15,27 @@ A production-grade, event-driven REST API for tracking physical book collections
 ### ✅ Done
 - Solution architecture created: `Spine.Api`, `Spine.Core`, `Spine.Infrastructure`, `Spine.Tests`, `Spine.Worker`.
 - **Database Schema Designed:** Created 9 core entities and configured the `AppDbContext` with relationships and indexes.
-- **JWT Authentication:** Register, Login (Email or DisplayName), and Account Management (Update Profile, Email, Password).
+- **JWT Authentication:** Register, Login (Email or DisplayName), and Account Management.
 - **Email Verification:** Uses Kafka and Resend to send verification links. Users cannot log in until verified.
 - **Password Reset:** Event-driven reset flow (API -> Kafka -> Worker -> Email).
 - **Integration Tests:** 9 tests passing (Auth, Account Management, JWT Authorization).
-- **Open Library Integration:** Fetch book metadata (Title, Author, Cover, Description, Page Count) by ISBN.
-- **Global Catalog:** Deduplicates books across users in the database.
-- **Library Management:** Users can add books to their personal library, update reading progress, and track status.
+- **External APIs & Fallbacks:** 
+  - Fetches metadata from Open Library.
+  - Falls back to **Google Books API** if fields (Author, Description, Genres, PageCount, Cover) are missing.
+  - Detects regional languages (Kannada, Telugu, Tamil) using Unicode character analysis.
+- **Global Catalog:** Deduplicates books across users. Supports manual entry for regional/obscure books not found in APIs.
+- **Library Management:** 
+  - Add books via ISBN or Manual Entry.
+  - Track progress (`CurrentPage` auto-snaps to `TotalPages` when status is set to "Finished").
+  - Filter by Status, Language, Genre, and Custom Tags.
 - **Reviews System:** Users can leave a 1-5 star public rating and written review for any book.
 - **Social Layer (Friendships):** Send, accept, and view friends.
 - **Privacy Enforcement:** Friends can only view a user's library if their privacy setting is `FriendsOnly` or `Public`.
 - **Activity Feed (Kafka):** When a user finishes a book, an event is published. The Worker writes a feed entry for the user and all their friends.
-- **Background Worker:** `Spine.Worker` consumes Kafka topics and handles emails and activity feed fan-out.
+- **Contact Form:** Submits messages via Kafka to the Background Worker.
 
 ### 🚧 In Progress
-- Preparing for Sprint 7: React Web Frontend, AI Chatbot, and Mobile App.
+- Sprint 7: React Web Frontend Setup (Vite + TypeScript + Tailwind).
 
 ---
 
@@ -56,10 +62,10 @@ The database is designed using a **Global Catalog** pattern to prevent duplicati
 ```text
 Spine/
 ├── Spine.Api/                  # HTTP endpoints, controllers, DTOs, Services
-│   ├── Controllers/            # Auth, Account, UserBooks, Books, Reviews, Friendships
+│   ├── Controllers/            # Auth, Account, UserBooks, Books, Reviews, Friendships, Contact
 │   ├── Models/                 # DTOs
 │   ├── Services/               # TokenService, KafkaProducerService, OpenLibraryService
-│   ├── Events/                 # Event DTOs (PasswordReset, UserRegistered, BookFinished)
+│   ├── Events/                 # Event DTOs (PasswordReset, UserRegistered, BookFinished, ContactForm)
 │   ├── Validators/             # FluentValidation rules
 │   └── Program.cs
 ├── Spine.Core/                 # Domain entities

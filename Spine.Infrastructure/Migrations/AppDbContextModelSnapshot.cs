@@ -67,7 +67,13 @@ namespace Spine.Infrastructure.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("text");
 
+                    b.Property<string>("Genres")
+                        .HasColumnType("text");
+
                     b.Property<string>("Isbn")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Language")
                         .HasColumnType("text");
 
                     b.Property<int?>("PageCount")

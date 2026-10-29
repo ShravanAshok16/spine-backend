@@ -13,4 +13,7 @@ public class UserBookResponse
     public string? PrivateNotes { get; set; }
     public string? LentTo { get; set; }
     public DateTime AddedAt { get; set; }
+    public int? TotalPages { get; set; }
+    public string? Language { get; set; }
+    public string? Genres { get; set; }
 }
