@@ -21,6 +21,7 @@ public class TokenService
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email),
+            new("DisplayName", user.DisplayName), // <-- ADD THIS
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 

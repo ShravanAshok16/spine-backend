@@ -22,9 +22,20 @@ if (!builder.Environment.IsEnvironment("Testing"))
 // 2. Auth & Token Service
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<KafkaProducerService>();
-
 builder.Services.AddHttpClient<OpenLibraryService>();
 
+// 3. CORS Policy
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
+// 4. JWT Auth
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -43,16 +54,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
-// 3. Logging
+// 5. Logging
 builder.Host.UseSerilog((ctx, cfg) =>
     cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 
-// 4. Controllers & Validation
+// 6. Controllers & Validation
 builder.Services.AddControllers();
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 
-// 5. Swagger (For testing endpoints)
+// 7. Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -74,7 +85,10 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// ==========================================
+// MIDDLEWARE PIPELINE (Order matters!)
+// ==========================================
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -83,6 +97,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
+
+// 🔥 THIS IS THE FIX — Apply CORS before auth
+app.UseCors("AllowFrontend");
 
 app.UseAuthentication();
 app.UseAuthorization();

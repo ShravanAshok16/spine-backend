@@ -18,6 +18,7 @@ namespace Spine.Infrastructure.Data
         public DbSet<Friendship> Friendships => Set<Friendship>();
         public DbSet<Activity> Activities => Set<Activity>();
         public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+        public DbSet<Quote> Quotes => Set<Quote>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -110,6 +111,25 @@ namespace Spine.Infrastructure.Data
                 e.HasOne(x => x.User)
                  .WithMany()
                  .HasForeignKey(x => x.UserId)
+                 .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<Quote>(e =>
+            {
+                e.HasKey(x => x.Id);
+                e.HasIndex(x => new { x.UserId, x.BookId }); // Fast fetching of quotes for a user and book
+                e.Property(x => x.Text).IsRequired();
+                e.Property(x => x.PageNumber).IsRequired();
+                e.Property(x => x.CreatedAt).IsRequired();
+
+                e.HasOne(x => x.User)
+                 .WithMany()
+                 .HasForeignKey(x => x.UserId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                e.HasOne(x => x.Book)
+                 .WithMany()
+                 .HasForeignKey(x => x.BookId)
                  .OnDelete(DeleteBehavior.Cascade);
             });
         }
