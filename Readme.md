@@ -3,57 +3,40 @@
 A production-grade, event-driven REST API for tracking physical book collections, sharing libraries with friends, and discovering new books.
 
 🌐 **Live API:** *(Coming in Sprint 7)*  
-💻 **Frontend Repo:** *(Coming in Sprint 7)*
+💻 **Frontend Repo:** [ShravanAshok16/spine-ui](https://github.com/ShravanAshok16/spine-ui)
 
 ---
 
 ## 📌 Current Status
 
-**Phase:** Backend Complete — Ready for Frontend
-**Progress:** `[██████████] 100%` (Backend MVP)
+**Phase:** Sprint 7 — Web Frontend Integration
+**Progress:** `[██████████] 100%` (Backend Core)
 
 ### ✅ Done
-- Solution architecture created: `Spine.Api`, `Spine.Core`, `Spine.Infrastructure`, `Spine.Tests`, `Spine.Worker`.
-- **Database Schema Designed:** Created 9 core entities and configured the `AppDbContext` with relationships and indexes.
-- **JWT Authentication:** Register, Login (Email or DisplayName), and Account Management.
-- **Email Verification:** Uses Kafka and Resend to send verification links. Users cannot log in until verified.
-- **Password Reset:** Event-driven reset flow (API -> Kafka -> Worker -> Email).
-- **Integration Tests:** 9 tests passing (Auth, Account Management, JWT Authorization).
-- **External APIs & Fallbacks:** 
-  - Fetches metadata from Open Library.
-  - Falls back to **Google Books API** if fields (Author, Description, Genres, PageCount, Cover) are missing.
-  - Detects regional languages (Kannada, Telugu, Tamil) using Unicode character analysis.
-- **Global Catalog:** Deduplicates books across users. Supports manual entry for regional/obscure books not found in APIs.
-- **Library Management:** 
-  - Add books via ISBN or Manual Entry.
-  - Track progress (`CurrentPage` auto-snaps to `TotalPages` when status is set to "Finished").
-  - Filter by Status, Language, Genre, and Custom Tags.
-- **Reviews System:** Users can leave a 1-5 star public rating and written review for any book.
-- **Social Layer (Friendships):** Send, accept, and view friends.
-- **Privacy Enforcement:** Friends can only view a user's library if their privacy setting is `FriendsOnly` or `Public`.
-- **Activity Feed (Kafka):** When a user finishes a book, an event is published. The Worker writes a feed entry for the user and all their friends.
-- **Contact Form:** Submits messages via Kafka to the Background Worker.
-
-### 🚧 In Progress
-- Sprint 7: React Web Frontend Setup (Vite + TypeScript + Tailwind).
+- **Solution architecture:** `Spine.Api`, `Spine.Core`, `Spine.Infrastructure`, `Spine.Tests`, `Spine.Worker`.
+- **Database:** Global Catalog pattern (`Books` + `UserBooks`), granular tracking (`OwnershipStatus`, `IsFavourite`, `Paused` status).
+- **Auth:** JWT (Email/DisplayName), Email Verification, Password Reset (Kafka).
+- **External APIs:** Open Library + Google Books fallback. ISBN Cover Fallback (direct URL generation).
+- **Library Management:** Batch Delete, Optimistic Updates support, Manual Series Creation, Duplicate Guard (ISBN + Title/Author).
+- **Social:** Friendships, Privacy enforcement, Kafka Activity Feed.
+- **Dynamic Data:** Open Library search, Dynamic Quote of the Day (24h cache).
 
 ---
 
 ## 🗄️ Data Model
 
-The database is designed using a **Global Catalog** pattern to prevent duplicating book data across users.
-
-| Table | Purpose | Key Relationships |
-|---|---|---|
-| `Users` | Accounts & privacy settings | Has many `UserBooks`, `Reviews` |
-| `Books` | Global catalog of books | Belongs to `Series` (optional) |
-| `Series` | Book series metadata | Has many `Books` |
-| `UserBooks` | A user's personal library | Belongs to `User` and `Book` |
-| `Tags` | Custom shelves (e.g., "Sci-Fi") | Many-to-Many with `UserBooks` |
-| `Reviews` | Public reviews and ratings | Belongs to `User` and `Book` |
-| `Friendships` | Social graph connections | Two FKs to `User` (Requester/Receiver) |
-| `Activities` | Feed of user actions | Belongs to `User` |
-| `PasswordResetTokens` | Secure reset tokens | Belongs to `User` |
+| Table | Purpose |
+|---|---|
+| `Users` | Accounts, JWT, Privacy settings. |
+| `Books` | Global catalog (deduplicated). |
+| `Series` | Groups books together. |
+| `UserBooks` | Personal library. Includes `Status` (Unread, Reading, Paused, Finished, DNF), `Ownership` (Owned, Wishlist, LentOut, etc.), `IsFavourite`, `CurrentPage`. |
+| `Tags` / `UserBookTags` | Custom shelves (Many-to-Many). |
+| `Reviews` | Public ratings and text. |
+| `Friendships` | Social graph (Requester/Receiver). |
+| `Activities` | Kafka-driven feed. |
+| `Quotes` | (Deprecated in favor of dynamic API, kept for future quote vault). |
+| `ReadingSessions` | Planned for Sprint 8. |
 
 ---
 
@@ -62,23 +45,20 @@ The database is designed using a **Global Catalog** pattern to prevent duplicati
 ```text
 Spine/
 ├── Spine.Api/                  # HTTP endpoints, controllers, DTOs, Services
-│   ├── Controllers/            # Auth, Account, UserBooks, Books, Reviews, Friendships, Contact
+│   ├── Controllers/            # Auth, Account, UserBooks, Books, Reviews, Friendships, Quotes, Contact
 │   ├── Models/                 # DTOs
-│   ├── Services/               # TokenService, KafkaProducerService, OpenLibraryService
-│   ├── Events/                 # Event DTOs (PasswordReset, UserRegistered, BookFinished, ContactForm)
-│   ├── Validators/             # FluentValidation rules
-│   └── Program.cs
-├── Spine.Core/                 # Domain entities
-│   └── Entities/
+│   ├── Services/               # TokenService, KafkaProducer, OpenLibrary, Email
+│   ├── Events/                 # Event DTOs
+│   └── Validators/             # FluentValidation
+├── Spine.Core/                 # Domain entities & Enums
+│   ├── Entities/
+│   └── Enums/                  # OwnershipStatus
 ├── Spine.Infrastructure/       # EF Core, DbContext, Migrations
-│   ├── Data/
-│   └── Migrations/
 ├── Spine.Worker/               # Background service (Kafka Consumer)
 │   ├── Services/               # EmailService (Resend)
 │   └── KafkaConsumerWorker.cs
 ├── Spine.Tests/                # Integration tests
-│   └── Integration/
-├── docker-compose.yml          # Local Kafka & Kafka-UI setup
+├── docker-compose.yml          # Local Kafka
 └── README.md
 
 ## 🚀 Setup

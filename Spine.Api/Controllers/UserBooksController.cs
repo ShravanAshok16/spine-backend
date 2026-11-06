@@ -114,7 +114,7 @@ public class UserBooksController : ControllerBase
             query = query.Where(ub => ub.Book.Genres != null && ub.Book.Genres.ToLower().Contains(genre.ToLower()));
 
         if (!string.IsNullOrWhiteSpace(tag))
-            query = query.Where(ub => ub.Tags.Any(t => t.Name.ToLower() == tag.ToLower()));
+            query = query.Where(ub => ub.Tags.Any(ubt => ubt.Tag.Name.ToLower() == tag.ToLower()));
 
         // 2. Sorting
         query = sort switch
@@ -145,7 +145,9 @@ public class UserBooksController : ControllerBase
                 PersonalRating = ub.PersonalRating,
                 PrivateNotes = ub.PrivateNotes,
                 LentTo = ub.LentTo,
-                AddedAt = ub.AddedAt
+                AddedAt = ub.AddedAt,
+                IsFavourite = ub.IsFavourite,
+                Ownership = ub.Ownership.ToString()
             })
             .ToListAsync();
 
@@ -182,7 +184,9 @@ public class UserBooksController : ControllerBase
             PersonalRating = userBook.PersonalRating,
             PrivateNotes = userBook.PrivateNotes,
             LentTo = userBook.LentTo,
-            AddedAt = userBook.AddedAt
+            AddedAt = userBook.AddedAt,
+            IsFavourite = userBook.IsFavourite,
+            Ownership = userBook.Ownership.ToString()
         });
     }
 
@@ -337,5 +341,100 @@ public class UserBooksController : ControllerBase
         await _db.SaveChangesAsync();
 
         return NoContent();
+    }
+
+    // 1. DTOs for the new endpoints
+    public class BatchDeleteRequest { public List<Guid> UserBookIds { get; set; } = new(); }
+    public class UpdateProgressRequest { public int CurrentPage { get; set; } }
+
+    // 3. New Endpoints:
+
+    [HttpPost("batch-delete")]
+    public async Task<IActionResult> BatchDelete([FromBody] BatchDeleteRequest request)
+    {
+        var userId = GetCurrentUserId();
+        var books = await _db.UserBooks
+            .Where(ub => request.UserBookIds.Contains(ub.Id) && ub.UserId == userId)
+            .ToListAsync();
+
+        foreach (var book in books)
+        {
+            book.IsDeleted = true;
+            book.DeletedAt = DateTime.UtcNow;
+        }
+        await _db.SaveChangesAsync();
+        return Ok(new { message = $"{books.Count} books moved to trash." });
+    }
+
+    [HttpPatch("{id:guid}/favourite")]
+    public async Task<IActionResult> ToggleFavourite(Guid id)
+    {
+        var userId = GetCurrentUserId();
+        var book = await _db.UserBooks.FirstOrDefaultAsync(ub => ub.Id == id && ub.UserId == userId);
+        if (book == null) return NotFound();
+
+        book.IsFavourite = !book.IsFavourite;
+        await _db.SaveChangesAsync();
+        return Ok(new { isFavourite = book.IsFavourite });
+    }
+
+    [HttpPatch("{id:guid}/progress")]
+    public async Task<IActionResult> UpdateProgress(Guid id, [FromBody] UpdateProgressRequest request)
+    {
+        var userId = GetCurrentUserId();
+        var book = await _db.UserBooks
+            .Include(ub => ub.Book)
+            .FirstOrDefaultAsync(ub => ub.Id == id && ub.UserId == userId);
+
+        if (book == null) return NotFound();
+
+        book.CurrentPage = request.CurrentPage;
+
+        // Auto-finish logic
+        if (book.Book.PageCount.HasValue && book.CurrentPage >= book.Book.PageCount.Value)
+        {
+            book.CurrentPage = book.Book.PageCount.Value;
+            book.Status = "Finished";
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(new { currentPage = book.CurrentPage, status = book.Status });
+    }
+
+    // Add this DTO at the bottom of the class (next to the other DTOs):
+    public class LinkSeriesRequest
+    {
+        public string SeriesName { get; set; } = string.Empty;
+        public List<Guid> BookIds { get; set; } = new();
+    }
+
+    [HttpPost("link-series")]
+    public async Task<IActionResult> LinkSeries([FromBody] LinkSeriesRequest request)
+    {
+        var userId = GetCurrentUserId();
+
+        // 1. Find or create the Series
+        var series = await _db.Series.FirstOrDefaultAsync(s => s.Name.ToLower() == request.SeriesName.ToLower());
+        if (series == null)
+        {
+            series = new Series { Name = request.SeriesName };
+            _db.Series.Add(series);
+            await _db.SaveChangesAsync();
+        }
+
+        // 2. Get the books belonging to the user
+        var userBooks = await _db.UserBooks
+            .Include(ub => ub.Book)
+            .Where(ub => request.BookIds.Contains(ub.BookId) && ub.UserId == userId)
+            .ToListAsync();
+
+        // 3. Link them to the Series
+        foreach (var ub in userBooks)
+        {
+            ub.Book.SeriesId = series.Id;
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(new { message = $"Linked {userBooks.Count} books to {series.Name}." });
     }
 }

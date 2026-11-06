@@ -18,4 +18,6 @@ public class UserBookResponse
     public string? Genres { get; set; }
     public Guid? SeriesId { get; set; }
     public string? SeriesName { get; set; }
+    public bool IsFavourite { get; set; }
+    public string Ownership { get; set; } = "Owned";
 }

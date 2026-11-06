@@ -1,21 +1,20 @@
 =====================================================================
-SPINE API — DAILY NOTES, SETUP & RETROSPECTIVE
+SPINE API — MASTER ARCHITECTURE & DAILY NOTES
 =====================================================================
 Author: Shravan Ashok
 Project: Spine (Book Library & Social Tracker)
-Coverage: Sprint 1 through Sprint 6 (Backend Complete)
+Coverage: Sprints 1 through 7 (Backend Core Complete)
 =====================================================================
-
 
 =====================================================================
 PART 0 — COMPLETE SETUP INSTRUCTIONS FROM SCRATCH
 =====================================================================
 
 --- 0.1 Prerequisites ---
-1. .NET 10 SDK (dotnet --version should print 10.x.x)
+1. .NET 10 SDK (Verify with `dotnet --version`)
 2. Docker Desktop (Required for local Kafka)
 3. Neon Account (Free Serverless PostgreSQL)
-4. Resend Account (For email delivery)
+4. Resend Account (Email Delivery)
 
 --- 0.2 Configure Secrets (User Secrets) ---
 Run these in the root `Spine` folder:
@@ -38,29 +37,27 @@ Access Kafka UI at: http://localhost:8080
 Terminal 1 (API):    dotnet run --project Spine.Api
 Terminal 2 (Worker): dotnet run --project Spine.Worker
 
-
 =====================================================================
 PART 1 — SPRINT 1: DATABASE & AUTHENTICATION
 =====================================================================
 
 --- Day 1: Database Schema & Foundation ---
 Key Architectural Decisions:
-1. **Global Catalog Pattern:** `Books` table (Global) and `UserBooks` (Join). "Harry Potter" is saved ONCE. Users link to it.
-2. **Soft Deletes:** `UserBooks` has `IsDeleted`. Never hard-delete user data immediately.
-3. **Self-Referencing Graph:** `Friendships` has TWO FKs to `Users` (`RequesterId`, `ReceiverId`). We used `DeleteBehavior.Restrict` so deleting a user doesn't cascade delete their friends.
-4. **Many-to-Many:** `Tags` to `UserBooks` requires `UserBookTags`.
+1. **Global Catalog Pattern:** `Books` table (Global) and `UserBooks` (Join). "Harry Potter" is saved ONCE in the global catalog. Users link to it via `UserBooks`. This saves massive database space.
+2. **Soft Deletes:** `UserBooks` has `IsDeleted` and `DeletedAt`. We never hard-delete user data immediately. A background job (planned for later) will hard-delete after 30 days.
+3. **Self-Referencing Graph:** `Friendships` has TWO FKs to `Users` (`RequesterId`, `ReceiverId`). We used `DeleteBehavior.Restrict` so deleting a user doesn't cascade-delete their friends.
+4. **Explicit Many-to-Many:** `Tags` to `UserBooks` requires a join entity `UserBookTag` because we eventually want to add metadata to the link (e.g., when the tag was added).
 
 --- Day 2 & 3: Auth & Account Management ---
 Key Decisions:
-1. **JWT Auth:** Stateless. Claims: `sub` (UserId), `email`.
-2. **Login Identifier:** Login accepts either Email OR DisplayName.
-3. **FluentValidation:** Kept strictly to *formatting*. Database checks (like "is this email taken?") were moved to the Controller because the auto-validation pipeline is synchronous and crashes on async DB calls.
+1. **JWT Auth:** Claims include `sub` (UserId), `email`, `DisplayName`, `FirstName`, `LastName`. The `FirstName` and `LastName` are needed for the personalized dashboard greeting.
+2. **Login Identifier:** Accepts either Email OR DisplayName.
+3. **FluentValidation:** Kept strictly to *formatting* (e.g., Email format, Password length). Database checks (like "is this email taken?") were moved to the Controller because the auto-validation pipeline is synchronous.
 
 --- Day 4: Email Verification ---
-- When a user registers, `IsEmailVerified` is set to false.
+- When a user registers, `IsEmailVerified = false`.
 - `AuthController` publishes a `UserRegisteredEvent` to Kafka.
-- The user cannot login until they verify their email.
-
+- The user cannot login until they verify their email via the link sent by the Worker.
 
 =====================================================================
 PART 2 — SPRINT 2: KAFKA & EMAILS
@@ -69,12 +66,11 @@ PART 2 — SPRINT 2: KAFKA & EMAILS
 --- Kafka & Resend Integration ---
 Why Event-Driven?
 Synchronous emails block the API thread. If Resend is slow, the API hangs.
-With Kafka: API drops a message and returns instantly. The Worker handles the email.
+With Kafka, the API drops a message and returns instantly. The Worker handles the email asynchronously.
 
 - **Producer:** `KafkaProducerService` publishes to `password-reset-events` and `user-registered-events`.
 - **Consumer:** `Spine.Worker` listens to both topics and calls `EmailService`.
 - **Email Service:** Uses Resend API. Note: Resend's sandbox restricts sending to the email you signed up with.
-
 
 =====================================================================
 PART 3 — SPRINT 3 & 4: LIBRARY & EXTERNAL APIS
@@ -82,19 +78,19 @@ PART 3 — SPRINT 3 & 4: LIBRARY & EXTERNAL APIS
 
 --- Open Library Integration ---
 - **The 3-Call Problem:** Open Library splits data. To get Title + Author + Description, we call `/isbn/...`, then `/authors/...`, then `/works/...`.
+- **Cover Fallback:** If the JSON metadata lacks a `cover_i`, we construct `https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg` directly. This fixes the 80% missing-cover problem.
 - **Adding a Book:** `POST /api/UserBooks` checks the Global Catalog first. Only fetches from Open Library if the book doesn't exist.
 
 --- Library Management ---
 - **GET /api/UserBooks:** Supports `?status=Reading`, `?search=`, and `?sort=title_asc`.
 - **PUT /api/UserBooks/{id}:** Updates `Status`, `CurrentPage`, `PersonalRating`, `PrivateNotes`, and `LentTo`.
 
---- Day 5 (Finalization): Resilience & Regional Support ---
+--- Day 5: Resilience & Regional Support ---
 - **Google Books Fallback:** If Open Library is missing Author, Description, Genres, PageCount, or Cover, we query Google Books API to fill in the blanks.
-- **Language Detection:** We detect Kannada, Telugu, and Tamil using Unicode character ranges in the title, and fall back to English.
+- **Language Detection:** We detect Kannada, Telugu, and Tamil using Unicode character ranges in the title.
 - **Manual Entry:** Added `POST /api/UserBooks/manual` for regional books that lack ISBNs in external APIs.
 - **Auto-Complete Pages:** If a book is marked "Finished", `CurrentPage` auto-snaps to `TotalPages`.
-- **Contact Form:** Built `ContactController` and published a `ContactFormSubmittedEvent` to Kafka.
-
+- **Duplicate Guard:** Prevents adding a book twice. Checks ISBN AND Title + Author.
 
 =====================================================================
 PART 4 — SPRINT 5 & 6: SOCIAL LAYER & ACTIVITY FEED
@@ -112,9 +108,26 @@ PART 4 — SPRINT 5 & 6: SOCIAL LAYER & ACTIVITY FEED
 - **The Worker:** Reads the event, finds all of User A's friends, and inserts a new `Activity` row for the user AND every friend.
 - **The DB Context Issue:** Because the Worker is a Singleton `BackgroundService`, it cannot inject `AppDbContext` (Scoped). We must use `IServiceScopeFactory` to create a scope for every message.
 
+=====================================================================
+PART 5 — SPRINT 7 (DAY 5): GRANULAR TRACKING & SERIES
+=====================================================================
+
+--- Ownership & Favourites ---
+- Added `OwnershipStatus` enum (Owned, Wishlist, LentOut, Sold, Donated, Lost).
+- Added `IsFavourite` boolean.
+- Added "Paused" to valid reading statuses.
+
+--- New Endpoints ---
+- `POST /batch-delete`: Takes a list of `UserBookIds`, soft-deletes them all.
+- `PATCH /{id}/favourite`: Toggles the favourite status.
+- `PATCH /{id}/progress`: Updates page count. Auto-sets to "Finished" if `CurrentPage >= PageCount`.
+- `POST /link-series`: Manually groups books into a Series.
+
+--- Series Search Fix ---
+- In `SearchBooksAsync`, we now make a secondary call to the Work record to extract the `series` name and parse it with Regex.
 
 =====================================================================
-PART 5 — PROBLEMS FACED AND HOW WE FIXED THEM
+PART 6 — PROBLEMS FACED AND HOW WE FIXED THEM
 =====================================================================
 
 1. **FluentValidation Async Error**
@@ -131,7 +144,7 @@ PART 5 — PROBLEMS FACED AND HOW WE FIXED THEM
 
 4. **Tests: Kafka 2-minute hang**
    - Cause: Tests tried to connect to `localhost:9092`.
-   - Fix: Created `MockKafkaProducerService` (marked real methods `virtual`) and injected it via `services.RemoveAll`.
+   - Fix: Created `MockKafkaProducerService` and injected it via `services.RemoveAll`.
 
 5. **Kafka Worker Crash: Topic not found**
    - Cause: Worker starts before the topic exists.
@@ -143,34 +156,19 @@ PART 5 — PROBLEMS FACED AND HOW WE FIXED THEM
 
 7. **Worker: ConnectionString not initialized**
    - Cause: `dotnet watch` ran from root, Worker didn't find `appsettings.json`.
-   - Fix: Used `dotnet user-secrets` on the `Spine.Worker` project and removed the direct `AppDbContext` injection in favor of `IServiceScopeFactory`.
+   - Fix: Used `dotnet user-secrets` on the `Spine.Worker` project.
 
-8. **Build Error: `GetCurrentUserId` missing**
-   - Cause: Helper method was accidentally pasted into the wrong controller.
-   - Fix: Moved it to the correct class.
+8. **JWT Error: `IDX10208: Unable to validate audience`**
+   - Cause: `appsettings.json` was missing the `Jwt:Audience` string.
+   - Fix: Added `"Audience": "SpineClient"` and updated TokenService.
 
-9. **README Encoding (Mojibake)**
-   - Cause: Saved as Windows-1252.
-   - Fix: Switched to UTF-8 in VS Code.
+9. **GitHub Push Protection: Resend API Key Blocked**
+   - Cause: The real API key was inside `bin/Debug/appsettings.json`.
+   - Fix: Ran `git rm -r --cached` on `bin/` and `obj/`, verified `.gitignore`.
 
-10. **JWT Error: `IDX10208: Unable to validate audience`**
-    - Cause: `appsettings.json` was missing the `Jwt:Audience` string, and `TokenService` wasn't adding the `aud` claim.
-    - Fix: Added `"Audience": "SpineClient"` to `appsettings.json` and `audience: _config["Jwt:Audience"]` to the token generator.
-
-11. **GitHub Push Protection: Resend API Key Blocked**
-    - Cause: The real API key was inside `bin/Debug/appsettings.json` and tracked by Git.
-    - Fix: Ran `git rm -r --cached` on all `bin/` and `obj/` folders, ensured `.gitignore` was correct, and committed the cleanup.
-
-
-=====================================================================
-PART 6 — WHAT WENT WELL
-=====================================================================
-- **Architecture:** `Spine.Api` and `Spine.Worker` are perfectly decoupled.
-- **Resilience:** If Resend goes down, the API stays up, and Kafka holds the message.
-- **Testing:** 9 integration tests caught crucial bugs (like the DB reset and Kafka hang).
-- **Data Integrity:** The Global Catalog saves massive amounts of DB space.
-- **Social Logic:** Implemented a true Graph relationship with strict privacy rules.
-- **External APIs:** Handled missing data from Open Library by falling back to Google Books.
+10. **C# Build Error: UserBook missing Tags**
+    - Cause: `Tag.cs` and `UserBookTag.cs` were missing.
+    - Fix: Created the files and configured the Explicit Join Entity in `AppDbContext`.
 
 =====================================================================
 END OF NOTES

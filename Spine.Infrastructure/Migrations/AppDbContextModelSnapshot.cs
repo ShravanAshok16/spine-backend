@@ -187,6 +187,34 @@ namespace Spine.Infrastructure.Migrations
                     b.ToTable("Quotes");
                 });
 
+            modelBuilder.Entity("Spine.Core.Entities.ReadingSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<int>("PagesRead")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserBookId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserBookId");
+
+                    b.ToTable("ReadingSessions");
+                });
+
             modelBuilder.Entity("Spine.Core.Entities.Review", b =>
                 {
                     b.Property<Guid>("Id")
@@ -337,8 +365,17 @@ namespace Spine.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsFavourite")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LentDate")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("LentTo")
                         .HasColumnType("text");
+
+                    b.Property<int>("Ownership")
+                        .HasColumnType("integer");
 
                     b.Property<int?>("PersonalRating")
                         .HasColumnType("integer");
@@ -365,19 +402,19 @@ namespace Spine.Infrastructure.Migrations
                     b.ToTable("UserBooks");
                 });
 
-            modelBuilder.Entity("TagUserBook", b =>
+            modelBuilder.Entity("Spine.Core.Entities.UserBookTag", b =>
                 {
-                    b.Property<Guid>("TagsId")
+                    b.Property<Guid>("UserBookId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("UserBooksId")
+                    b.Property<Guid>("TagId")
                         .HasColumnType("uuid");
 
-                    b.HasKey("TagsId", "UserBooksId");
+                    b.HasKey("UserBookId", "TagId");
 
-                    b.HasIndex("UserBooksId");
+                    b.HasIndex("TagId");
 
-                    b.ToTable("UserBookTags", (string)null);
+                    b.ToTable("UserBookTags");
                 });
 
             modelBuilder.Entity("Spine.Core.Entities.Activity", b =>
@@ -456,6 +493,17 @@ namespace Spine.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Spine.Core.Entities.ReadingSession", b =>
+                {
+                    b.HasOne("Spine.Core.Entities.UserBook", "UserBook")
+                        .WithMany("ReadingSessions")
+                        .HasForeignKey("UserBookId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("UserBook");
+                });
+
             modelBuilder.Entity("Spine.Core.Entities.Review", b =>
                 {
                     b.HasOne("Spine.Core.Entities.Book", "Book")
@@ -494,24 +542,40 @@ namespace Spine.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("TagUserBook", b =>
+            modelBuilder.Entity("Spine.Core.Entities.UserBookTag", b =>
                 {
-                    b.HasOne("Spine.Core.Entities.Tag", null)
-                        .WithMany()
-                        .HasForeignKey("TagsId")
+                    b.HasOne("Spine.Core.Entities.Tag", "Tag")
+                        .WithMany("UserBookTags")
+                        .HasForeignKey("TagId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Spine.Core.Entities.UserBook", null)
-                        .WithMany()
-                        .HasForeignKey("UserBooksId")
+                    b.HasOne("Spine.Core.Entities.UserBook", "UserBook")
+                        .WithMany("Tags")
+                        .HasForeignKey("UserBookId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Tag");
+
+                    b.Navigation("UserBook");
                 });
 
             modelBuilder.Entity("Spine.Core.Entities.Series", b =>
                 {
                     b.Navigation("Books");
+                });
+
+            modelBuilder.Entity("Spine.Core.Entities.Tag", b =>
+                {
+                    b.Navigation("UserBookTags");
+                });
+
+            modelBuilder.Entity("Spine.Core.Entities.UserBook", b =>
+                {
+                    b.Navigation("ReadingSessions");
+
+                    b.Navigation("Tags");
                 });
 #pragma warning restore 612, 618
         }

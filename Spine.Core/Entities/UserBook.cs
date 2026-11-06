@@ -1,33 +1,31 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using Spine.Core.Enums; // Add this at the top
 
-namespace Spine.Core.Entities
+namespace Spine.Core.Entities;
+
+public class UserBook
 {
-    public class UserBook
-    {
-
-        public Guid Id { get; set; } = Guid.NewGuid();
-
-        public Guid UserId { get; set; }
-        public User User { get; set; } = null!;
-
-        public Guid BookId { get; set; }
-        public Book Book { get; set; } = null!;
-
-        public string Status { get; set; } = "Unread"; // Unread, Reading, Finished, DNF
-        public int CurrentPage { get; set; } = 0;
-        public int? PersonalRating { get; set; }
-        public string? PrivateNotes { get; set; }
-        public string? LentTo { get; set; }
-
-        public DateTime AddedAt { get; set; } = DateTime.UtcNow;
-
-        // Soft delete
-        public bool IsDeleted { get; set; } = false;
-        public DateTime? DeletedAt { get; set; }
-
-        public ICollection<Tag> Tags { get; set; } = new List<Tag>();
-    }
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+    public Guid BookId { get; set; }
+    public Book Book { get; set; } = null!;
+    
+    // Statuses: Unread, Reading, Paused, Finished, DNF
+    public string Status { get; set; } = "Unread"; 
+    
+    public bool IsFavourite { get; set; } = false;
+    public OwnershipStatus Ownership { get; set; } = OwnershipStatus.Owned;
+    
+    public int CurrentPage { get; set; } = 0;
+    public int? PersonalRating { get; set; }
+    public string? PrivateNotes { get; set; }
+    public string? LentTo { get; set; }
+    public DateTime? LentDate { get; set; }
+    
+    public bool IsDeleted { get; set; } = false;
+    public DateTime? DeletedAt { get; set; }
+    public DateTime AddedAt { get; set; } = DateTime.UtcNow;
+    
+    public ICollection<ReadingSession> ReadingSessions { get; set; } = new List<ReadingSession>();
+    public ICollection<UserBookTag> Tags { get; set; } = new List<UserBookTag>();
 }

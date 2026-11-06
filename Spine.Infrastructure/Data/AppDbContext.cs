@@ -14,6 +14,8 @@ namespace Spine.Infrastructure.Data
         public DbSet<Series> Series => Set<Series>();
         public DbSet<UserBook> UserBooks => Set<UserBook>();
         public DbSet<Tag> Tags => Set<Tag>();
+        public DbSet<UserBookTag> UserBookTags => Set<UserBookTag>(); // 🔥 Added this
+        public DbSet<ReadingSession> ReadingSessions => Set<ReadingSession>(); // 🔥 Added this
         public DbSet<Review> Reviews => Set<Review>();
         public DbSet<Friendship> Friendships => Set<Friendship>();
         public DbSet<Activity> Activities => Set<Activity>();
@@ -38,7 +40,7 @@ namespace Spine.Infrastructure.Data
             modelBuilder.Entity<Book>(e =>
             {
                 e.HasKey(x => x.Id);
-                e.HasIndex(x => x.Isbn); // Not unique, some books might lack it or share it
+                e.HasIndex(x => x.Isbn);
                 e.Property(x => x.Title).HasMaxLength(500).IsRequired();
                 e.Property(x => x.Author).HasMaxLength(300).IsRequired();
 
@@ -52,8 +54,8 @@ namespace Spine.Infrastructure.Data
             modelBuilder.Entity<UserBook>(e =>
             {
                 e.HasKey(x => x.Id);
-                e.HasIndex(x => new { x.UserId, x.Status }); // Fast dashboard queries
-                e.HasIndex(x => new { x.UserId, x.BookId }).IsUnique(); // User can only own a book once
+                e.HasIndex(x => new { x.UserId, x.Status });
+                e.HasIndex(x => new { x.UserId, x.BookId }).IsUnique();
 
                 e.HasOne(x => x.User)
                  .WithMany()
@@ -66,7 +68,7 @@ namespace Spine.Infrastructure.Data
                  .OnDelete(DeleteBehavior.Cascade);
             });
 
-            // 4. Friendship (The tricky one: two FKs to User)
+            // 4. Friendship
             modelBuilder.Entity<Friendship>(e =>
             {
                 e.HasKey(x => x.Id);
@@ -74,7 +76,7 @@ namespace Spine.Infrastructure.Data
                 e.HasOne(x => x.Requester)
                  .WithMany()
                  .HasForeignKey(x => x.RequesterId)
-                 .OnDelete(DeleteBehavior.Restrict); // Don't cascade delete friendships if a user is deleted
+                 .OnDelete(DeleteBehavior.Restrict);
 
                 e.HasOne(x => x.Receiver)
                  .WithMany()
@@ -86,24 +88,46 @@ namespace Spine.Infrastructure.Data
             modelBuilder.Entity<Review>(e =>
             {
                 e.HasKey(x => x.Id);
-                e.HasIndex(x => x.BookId); // Fast fetching of reviews for a book
+                e.HasIndex(x => x.BookId);
                 e.Property(x => x.Rating).IsRequired();
                 e.Property(x => x.ReviewText).HasMaxLength(2000);
             });
 
-            // 6. Tags (Many-to-Many with UserBook)
+            // 6. Tags (Using explicit UserBookTag join entity)
             modelBuilder.Entity<Tag>(e =>
             {
                 e.HasKey(x => x.Id);
                 e.HasIndex(x => new { x.UserId, x.Name }).IsUnique();
             });
 
-            modelBuilder.Entity<UserBook>()
-                .HasMany(x => x.Tags)
-                .WithMany(t => t.UserBooks)
-                .UsingEntity(j => j.ToTable("UserBookTags"));
+            modelBuilder.Entity<UserBookTag>(e =>
+            {
+                e.HasKey(ubt => new { ubt.UserBookId, ubt.TagId });
 
-            // 7. Password Reset Token
+                e.HasOne(ubt => ubt.UserBook)
+                 .WithMany(ub => ub.Tags)
+                 .HasForeignKey(ubt => ubt.UserBookId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                e.HasOne(ubt => ubt.Tag)
+                 .WithMany(t => t.UserBookTags)
+                 .HasForeignKey(ubt => ubt.TagId)
+                 .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // 7. Reading Session
+            modelBuilder.Entity<ReadingSession>(e =>
+            {
+                e.HasKey(x => x.Id);
+                e.HasIndex(x => x.UserBookId);
+                
+                e.HasOne(x => x.UserBook)
+                 .WithMany(ub => ub.ReadingSessions)
+                 .HasForeignKey(x => x.UserBookId)
+                 .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // 8. Password Reset Token
             modelBuilder.Entity<PasswordResetToken>(e =>
             {
                 e.HasKey(x => x.Id);
@@ -114,10 +138,11 @@ namespace Spine.Infrastructure.Data
                  .OnDelete(DeleteBehavior.Cascade);
             });
 
+            // 9. Quotes
             modelBuilder.Entity<Quote>(e =>
             {
                 e.HasKey(x => x.Id);
-                e.HasIndex(x => new { x.UserId, x.BookId }); // Fast fetching of quotes for a user and book
+                e.HasIndex(x => new { x.UserId, x.BookId });
                 e.Property(x => x.Text).IsRequired();
                 e.Property(x => x.PageNumber).IsRequired();
                 e.Property(x => x.CreatedAt).IsRequired();
