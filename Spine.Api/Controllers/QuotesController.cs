@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Spine.Infrastructure.Data;
+using System.Text.Json;
 
 namespace Spine.Api.Controllers;
 
@@ -10,32 +9,40 @@ namespace Spine.Api.Controllers;
 [Authorize]
 public class QuotesController : ControllerBase
 {
-    private readonly AppDbContext _db;
-    public QuotesController(AppDbContext db) => _db = db;
+    private readonly HttpClient _httpClient;
+    private static string? _cachedQuote = null;
+    private static string? _cachedAuthor = null;
+    private static DateTime _cacheDate = DateTime.MinValue;
 
-    [HttpGet("random")]
-    public async Task<IActionResult> GetRandomQuote()
+    public QuotesController(IHttpClientFactory httpClientFactory)
     {
-        // 🔥 Safely extract the user ID (checking both standard claim types)
-        var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
-               ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-               
-        if (string.IsNullOrEmpty(sub)) return Unauthorized();
-        var userId = Guid.Parse(sub);
-        
-        var quote = await _db.Quotes
-            .Include(q => q.Book)
-            .Where(q => q.UserId == userId)
-            .OrderBy(r => Guid.NewGuid()) // Random
-            .FirstOrDefaultAsync();
+        _httpClient = httpClientFactory.CreateClient();
+    }
 
-        if (quote == null) return NoContent();
+    [HttpGet("daily")]
+    public async Task<IActionResult> GetDailyQuote()
+    {
+        if (_cacheDate.Date == DateTime.UtcNow.Date && _cachedQuote != null)
+            return Ok(new { Text = _cachedQuote, Author = _cachedAuthor });
+
+        try
+        {
+            var response = await _httpClient.GetAsync("https://api.quotable.io/random?tags=books,reading,literature");
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                _cachedQuote = doc.RootElement.GetProperty("content").GetString();
+                _cachedAuthor = doc.RootElement.GetProperty("author").GetString();
+                _cacheDate = DateTime.UtcNow;
+                return Ok(new { Text = _cachedQuote, Author = _cachedAuthor });
+            }
+        }
+        catch { /* Fallback below */ }
 
         return Ok(new { 
-            Text = quote.Text, 
-            PageNumber = quote.PageNumber, 
-            BookTitle = quote.Book.Title, 
-            Author = quote.Book.Author 
+            Text = "A room without books is like a body without a soul.", 
+            Author = "Marcus Tullius Cicero" 
         });
     }
 }

@@ -50,8 +50,8 @@ public class UserBooksController : ControllerBase
                 CoverUrl = bookData.CoverUrl,
                 Description = bookData.Description,
                 PageCount = bookData.PageCount,
-                Language = bookData.Language, // <-- Added
-                Genres = bookData.Genres      // <-- Added
+                Language = bookData.Language,
+                Genres = bookData.Genres
             };
             _db.Books.Add(existingBook);
             await _db.SaveChangesAsync();
@@ -81,8 +81,8 @@ public class UserBooksController : ControllerBase
     public async Task<IActionResult> GetMyLibrary(
         [FromQuery] string? status = null,
         [FromQuery] string? search = null,
-        [FromQuery] string? language = null, 
-        [FromQuery] string? genre = null,    
+        [FromQuery] string? language = null,
+        [FromQuery] string? genre = null,
         [FromQuery] string? tag = null,
         [FromQuery] string sort = "added_desc")
     {
@@ -92,6 +92,7 @@ public class UserBooksController : ControllerBase
             .AsNoTracking()
             .Where(ub => ub.UserId == userId && !ub.IsDeleted)
             .Include(ub => ub.Book)
+            .Include(ub => ub.Book.Series)
             .AsQueryable();
 
         // 1. Filters
@@ -139,6 +140,8 @@ public class UserBooksController : ControllerBase
                 TotalPages = ub.Book.PageCount, // <-- Added
                 Language = ub.Book.Language,    // <-- Added
                 Genres = ub.Book.Genres,        // <-- Added
+                SeriesId = ub.Book.SeriesId,
+                SeriesName = ub.Book.Series != null ? ub.Book.Series.Name : null,
                 PersonalRating = ub.PersonalRating,
                 PrivateNotes = ub.PrivateNotes,
                 LentTo = ub.LentTo,
@@ -157,6 +160,7 @@ public class UserBooksController : ControllerBase
         var userBook = await _db.UserBooks
             .AsNoTracking()
             .Include(ub => ub.Book)
+            .Include(ub => ub.Book.Series)
             .FirstOrDefaultAsync(ub => ub.Id == id && ub.UserId == userId && !ub.IsDeleted);
 
         if (userBook is null) return NotFound();
@@ -173,6 +177,8 @@ public class UserBooksController : ControllerBase
             TotalPages = userBook.Book.PageCount, // <-- Added
             Language = userBook.Book.Language,    // <-- Added
             Genres = userBook.Book.Genres,        // <-- Added
+            SeriesId = userBook.Book.SeriesId,
+            SeriesName = userBook.Book.Series != null ? userBook.Book.Series.Name : null,
             PersonalRating = userBook.PersonalRating,
             PrivateNotes = userBook.PrivateNotes,
             LentTo = userBook.LentTo,
@@ -239,19 +245,56 @@ public class UserBooksController : ControllerBase
     {
         var userId = GetCurrentUserId();
 
-        var book = new Book
-        {
-            Title = request.Title,
-            Author = request.Author,
-            Language = request.Language,
-            Isbn = request.Isbn,
-            Description = request.Description,
-            PageCount = request.PageCount,
-            Genres = request.Genres
-        };
+        // 1. Check for duplicates
+        var existingBook = await _db.Books.FirstOrDefaultAsync(b =>
+            (!string.IsNullOrEmpty(request.Isbn) && b.Isbn == request.Isbn) ||
+            (b.Title.ToLower() == request.Title.ToLower() && b.Author.ToLower() == request.Author.ToLower()));
 
-        _db.Books.Add(book);
-        await _db.SaveChangesAsync();
+        Book book;
+
+        if (existingBook != null)
+        {
+            var alreadyOwned = await _db.UserBooks.AnyAsync(ub => ub.UserId == userId && ub.BookId == existingBook.Id);
+            if (alreadyOwned) return BadRequest(new { message = "You already have this book." });
+            book = existingBook;
+        }
+        else
+        {
+            // 2. Handle Series Creation
+            Guid? seriesId = null;
+            if (!string.IsNullOrEmpty(request.SeriesName))
+            {
+                var existingSeries = await _db.Series.FirstOrDefaultAsync(s => s.Name.ToLower() == request.SeriesName.ToLower());
+                if (existingSeries != null)
+                {
+                    seriesId = existingSeries.Id;
+                }
+                else
+                {
+                    var newSeries = new Series { Name = request.SeriesName };
+                    _db.Series.Add(newSeries);
+                    await _db.SaveChangesAsync();
+                    seriesId = newSeries.Id;
+                }
+            }
+
+            // 3. Create Book
+            book = new Book
+            {
+                Title = request.Title,
+                Author = request.Author,
+                Language = request.Language,
+                Isbn = request.Isbn,
+                Description = request.Description,
+                PageCount = request.PageCount,
+                Genres = request.Genres,
+                CoverUrl = request.CoverUrl,
+                SeriesId = seriesId,                     // <-- Save Series
+                SeriesPosition = request.SeriesPosition  // <-- Save Position
+            };
+            _db.Books.Add(book);
+            await _db.SaveChangesAsync();
+        }
 
         var userBook = new UserBook
         {
@@ -264,7 +307,7 @@ public class UserBooksController : ControllerBase
         _db.UserBooks.Add(userBook);
         await _db.SaveChangesAsync();
 
-        return Ok(new { message = "Book added manually.", bookId = book.Id });
+        return Ok(new { message = "Book added successfully." });
     }
 
     private Guid GetCurrentUserId()
@@ -276,5 +319,23 @@ public class UserBooksController : ControllerBase
             throw new UnauthorizedAccessException("User identity not found in token.");
 
         return Guid.Parse(sub);
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> DeleteUserBook(Guid id)
+    {
+        var userId = GetCurrentUserId();
+
+        var userBook = await _db.UserBooks
+            .FirstOrDefaultAsync(ub => ub.Id == id && ub.UserId == userId && !ub.IsDeleted);
+
+        if (userBook is null) return NotFound();
+
+        // Soft delete
+        userBook.IsDeleted = true;
+        userBook.DeletedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return NoContent();
     }
 }

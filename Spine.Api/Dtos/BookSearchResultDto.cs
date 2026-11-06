@@ -10,4 +10,6 @@ public class BookSearchResultDto
     public int? PageCount { get; set; }
     public string? Genres { get; set; }
     public string? Language { get; set; }
+    public string? SeriesName { get; set; }
+    public int? SeriesPosition { get; set; }
 }

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Spine.Api.Models;
 using Spine.Api.Services;
 
 namespace Spine.Api.Controllers;
@@ -20,10 +21,21 @@ public class BooksController : ControllerBase
     public async Task<IActionResult> LookupIsbn(string isbn)
     {
         var result = await _openLibraryService.GetBookByIsbnAsync(isbn);
-        
+
         if (result is null)
             return NotFound(new { message = "Book not found on Open Library." });
 
         return Ok(result);
     }
+
+    [HttpGet("search")]
+    public async Task<IActionResult> SearchBooks([FromQuery] string q)
+    {
+        if (string.IsNullOrWhiteSpace(q) || q.Length < 3)
+            return Ok(new List<BookSearchResultDto>());
+
+        var results = await _openLibraryService.SearchBooksAsync(q);
+        return Ok(results);
+    }
+    
 }

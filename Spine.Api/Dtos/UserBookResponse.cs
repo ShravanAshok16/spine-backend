@@ -16,4 +16,6 @@ public class UserBookResponse
     public int? TotalPages { get; set; }
     public string? Language { get; set; }
     public string? Genres { get; set; }
+    public Guid? SeriesId { get; set; }
+    public string? SeriesName { get; set; }
 }

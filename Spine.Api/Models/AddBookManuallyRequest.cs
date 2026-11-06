@@ -9,4 +9,8 @@ public class AddBookManuallyRequest
     public string? Description { get; set; }
     public int? PageCount { get; set; }
     public string? Genres { get; set; }
+    public string? CoverUrl { get; set; }
+    public Guid? SeriesId { get; set; }
+    public string? SeriesName { get; set; }
+    public int? SeriesPosition { get; set; }
 }
