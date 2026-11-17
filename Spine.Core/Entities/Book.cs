@@ -14,4 +14,8 @@ public class Book
     public int? SeriesPosition { get; set; }
     public string? Genres { get; set; }
     public string? Language { get; set; }
+    public string? LanguageCode { get; set; } // e.g. "kn", "en"
+    public string? OriginalTitle { get; set; }
+    public string? TransliteratedTitle { get; set; }
+    public int? PublishYear { get; set; } // Optional, if you have it
 }

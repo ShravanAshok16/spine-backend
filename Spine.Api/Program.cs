@@ -22,9 +22,20 @@ if (!builder.Environment.IsEnvironment("Testing"))
 // 2. Auth & Token Service
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<KafkaProducerService>();
-builder.Services.AddHttpClient<OpenLibraryService>();
 
-// 3. CORS Policy
+// 🔥 3. External Book APIs (FORCING IPV4 & TIMEOUTS)
+builder.Services.AddHttpClient<OpenLibraryService>()
+    .ConfigurePrimaryHttpMessageHandler(() => Ipv4HttpHandler.Create())
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(10)); // 🔥 Added Timeout
+
+builder.Services.AddHttpClient<GoogleBooksService>()
+    .ConfigurePrimaryHttpMessageHandler(() => Ipv4HttpHandler.Create())
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(10)); // 🔥 Added Timeout
+
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<BookLookupService>();
+
+// 4. CORS Policy
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -35,7 +46,7 @@ builder.Services.AddCors(options =>
     });
 });
 
-// 4. JWT Auth
+// 5. JWT Auth
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -54,16 +65,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
-// 5. Logging
+// 6. Logging
 builder.Host.UseSerilog((ctx, cfg) =>
     cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 
-// 6. Controllers & Validation
+// 7. Controllers & Validation
 builder.Services.AddControllers();
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 
-// 7. Swagger
+// 8. Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -98,7 +109,7 @@ if (app.Environment.IsDevelopment())
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
 
-// 🔥 THIS IS THE FIX — Apply CORS before auth
+// Apply CORS before auth
 app.UseCors("AllowFrontend");
 
 app.UseAuthentication();

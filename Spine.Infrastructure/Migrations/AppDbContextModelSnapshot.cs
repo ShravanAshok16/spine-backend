@@ -76,7 +76,16 @@ namespace Spine.Infrastructure.Migrations
                     b.Property<string>("Language")
                         .HasColumnType("text");
 
+                    b.Property<string>("LanguageCode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OriginalTitle")
+                        .HasColumnType("text");
+
                     b.Property<int?>("PageCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PublishYear")
                         .HasColumnType("integer");
 
                     b.Property<Guid?>("SeriesId")
@@ -89,6 +98,9 @@ namespace Spine.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<string>("TransliteratedTitle")
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -195,6 +207,9 @@ namespace Spine.Infrastructure.Migrations
 
                     b.Property<DateTime?>("EndedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Mood")
+                        .HasColumnType("text");
 
                     b.Property<string>("Notes")
                         .HasColumnType("text");

@@ -20,4 +20,8 @@ public class UserBookResponse
     public string? SeriesName { get; set; }
     public bool IsFavourite { get; set; }
     public string Ownership { get; set; } = "Owned";
+    public string? Isbn { get; set; }
+    public string? Description { get; set; }
+    public int? PageCount { get; set; }
+    public int? PublishYear { get; set; } // Optional, if you have it
 }

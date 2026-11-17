@@ -2,24 +2,24 @@
 
 A production-grade, event-driven REST API for tracking physical book collections, sharing libraries with friends, and discovering new books.
 
-🌐 **Live API:** *(Coming in Sprint 7)*  
+🌐 **Live API:** *(Coming soon)*  
 💻 **Frontend Repo:** [ShravanAshok16/spine-ui](https://github.com/ShravanAshok16/spine-ui)
 
 ---
 
 ## 📌 Current Status
 
-**Phase:** Sprint 7 — Web Frontend Integration
+**Phase:** Sprint 8 — Resilience & Discovery (Backend Complete)
 **Progress:** `[██████████] 100%` (Backend Core)
 
 ### ✅ Done
-- **Solution architecture:** `Spine.Api`, `Spine.Core`, `Spine.Infrastructure`, `Spine.Tests`, `Spine.Worker`.
-- **Database:** Global Catalog pattern (`Books` + `UserBooks`), granular tracking (`OwnershipStatus`, `IsFavourite`, `Paused` status).
-- **Auth:** JWT (Email/DisplayName), Email Verification, Password Reset (Kafka).
-- **External APIs:** Open Library + Google Books fallback. ISBN Cover Fallback (direct URL generation).
-- **Library Management:** Batch Delete, Optimistic Updates support, Manual Series Creation, Duplicate Guard (ISBN + Title/Author).
+- **Architecture:** `.NET 10`, EF Core, PostgreSQL (Neon), Kafka, Worker Service.
+- **Data Model:** Global Catalog, Granular Tracking (Ownership, Favourites, Paused).
+- **Auth:** JWT, Email Verification, Password Reset (Kafka).
+- **Provider Pattern:** `BookLookupService` orchestrates Google Books and OpenLibrary.
+- **Performance:** `IMemoryCache` (12h TTL), `Ipv4HttpHandler` (fixes 19s hangs), 10s API timeouts.
+- **Data Quality:** High-res covers (`zoom=3`), `?default=false` fallbacks, HTML stripping via `TextCleaner`.
 - **Social:** Friendships, Privacy enforcement, Kafka Activity Feed.
-- **Dynamic Data:** Open Library search, Dynamic Quote of the Day (24h cache).
 
 ---
 
@@ -28,15 +28,12 @@ A production-grade, event-driven REST API for tracking physical book collections
 | Table | Purpose |
 |---|---|
 | `Users` | Accounts, JWT, Privacy settings. |
-| `Books` | Global catalog (deduplicated). |
+| `Books` | Global catalog (deduplicated, `PublishYear` added). |
 | `Series` | Groups books together. |
-| `UserBooks` | Personal library. Includes `Status` (Unread, Reading, Paused, Finished, DNF), `Ownership` (Owned, Wishlist, LentOut, etc.), `IsFavourite`, `CurrentPage`. |
-| `Tags` / `UserBookTags` | Custom shelves (Many-to-Many). |
-| `Reviews` | Public ratings and text. |
-| `Friendships` | Social graph (Requester/Receiver). |
+| `UserBooks` | Personal library. Includes Status, Ownership, Favourite, Progress. |
+| `ReadingSessions` | Planned for Sprint 9. |
+| `Friendships` | Social graph. |
 | `Activities` | Kafka-driven feed. |
-| `Quotes` | (Deprecated in favor of dynamic API, kept for future quote vault). |
-| `ReadingSessions` | Planned for Sprint 8. |
 
 ---
 
@@ -44,22 +41,14 @@ A production-grade, event-driven REST API for tracking physical book collections
 
 ```text
 Spine/
-├── Spine.Api/                  # HTTP endpoints, controllers, DTOs, Services
-│   ├── Controllers/            # Auth, Account, UserBooks, Books, Reviews, Friendships, Quotes, Contact
-│   ├── Models/                 # DTOs
-│   ├── Services/               # TokenService, KafkaProducer, OpenLibrary, Email
-│   ├── Events/                 # Event DTOs
-│   └── Validators/             # FluentValidation
-├── Spine.Core/                 # Domain entities & Enums
-│   ├── Entities/
-│   └── Enums/                  # OwnershipStatus
-├── Spine.Infrastructure/       # EF Core, DbContext, Migrations
-├── Spine.Worker/               # Background service (Kafka Consumer)
-│   ├── Services/               # EmailService (Resend)
-│   └── KafkaConsumerWorker.cs
-├── Spine.Tests/                # Integration tests
-├── docker-compose.yml          # Local Kafka
-└── README.md
+├── Spine.Api/                  # Controllers, Services, Middleware
+│   ├── Controllers/            # Auth, UserBooks, Books, Quotes, Friendships, etc.
+│   ├── Services/               # BookLookup, GoogleBooks, OpenLibrary, Token
+│   └── Program.cs
+├── Spine.Core/                 # Domain Entities & Enums
+├── Spine.Infrastructure/       # EF Core & Migrations
+├── Spine.Worker/               # Kafka Consumer (Emails & Feed)
+└── Spine.Tests/                # Integration Tests
 
 ## 🚀 Setup
 

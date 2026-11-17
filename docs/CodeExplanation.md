@@ -150,6 +150,35 @@ PART 6 — INTEGRATION TESTS & TRICKY FIXES
     - Directly sets `IsEmailVerified = true` in the InMemory DB to bypass email sending.
     - Logs in to get the JWT.
 
+
+--- Spine.Api/Services/Ipv4HttpHandler.cs (NEW) ---
+  - Forces IPv4 DNS resolution. 
+  - Prevents Windows from hanging on IPv6 timeouts for OpenLibrary.
+
+--- Spine.Api/Services/BookLookupService.cs (UPDATED) ---
+  - Uses `IMemoryCache`. 
+  - Checks if `result` is complete (`Description` and `PageCount`).
+  - If complete, returns instantly.
+  - If not, calls `FindOnGoogleAsync` first, then `OpenLibrary`.
+  - Merges results (Google > OpenLibrary > Local DB).
+  - Uses `TextCleaner.CleanDescription()` before returning.
+
+--- Spine.Api/Services/GoogleBooksService.cs (UPDATED) ---
+  - Reads `GoogleBooks:ApiKey` from `IConfiguration`.
+  - Appends `&langRestrict={language}` to search for regional books.
+  - Upgrades covers: `.Replace("zoom=1", "zoom=3")` for high resolution.
+
+--- Spine.Api/Controllers/BooksController.cs (UPDATED) ---
+  - `GET /details/{identifier}`: Universal endpoint handling GUIDs, ISBNs, and Titles.
+  - `GET /discover`: Fetches books by subject/language.
+  - `GET /recommendations`: Analyzes user's top genres, then fetches.
+
+--- Spine.Api/Program.cs (UPDATED) ---
+  - Registers `Ipv4HttpHandler` for both Google and OpenLibrary.
+  - Sets `.Timeout = TimeSpan.FromSeconds(10)`.
+  - Adds `builder.Services.AddMemoryCache()`.
+=====================================================================
+
 =====================================================================
 END OF NOTES
 =====================================================================

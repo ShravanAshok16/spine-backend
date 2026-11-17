@@ -1,6 +1,8 @@
 using System.Text.Json;
-using Spine.Api.Models;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+using Spine.Api.Models;
+using Spine.Infrastructure.Data;
 
 namespace Spine.Api.Services;
 
@@ -12,154 +14,57 @@ public class OpenLibraryService
     {
         _httpClient = httpClient;
         _httpClient.BaseAddress = new Uri("https://openlibrary.org/");
+
+        if (!_httpClient.DefaultRequestHeaders.Contains("User-Agent"))
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "SpineApp/1.0");
     }
 
+    // -------------------------------------------------------
+    // Main entry point
+    // -------------------------------------------------------
+    public async Task<BookSearchResultDto?> GetBookByIdentifierAsync(string identifier)
+    {
+        if (string.IsNullOrWhiteSpace(identifier)) return null;
+
+        identifier = identifier.Trim();
+
+        // 1. Real ISBN
+        var cleanIsbn = identifier.Replace("-", "").Replace(" ", "");
+        if ((cleanIsbn.Length == 10 || cleanIsbn.Length == 13) && cleanIsbn.All(char.IsDigit))
+            return await GetBookByIsbnAsync(cleanIsbn);
+
+        // 2. Open Library Edition ID (OL...M)
+        if (identifier.StartsWith("OL", StringComparison.OrdinalIgnoreCase) && identifier.EndsWith("M"))
+            return await GetByOpenLibraryEditionAsync(identifier);
+
+        // 3. Open Library Work ID (OL...W)
+        if (identifier.StartsWith("OL", StringComparison.OrdinalIgnoreCase) && identifier.EndsWith("W"))
+            return await GetByOpenLibraryWorkAsync(identifier);
+
+        // 4. Free text / title search
+        var results = await SearchBooksAsync(identifier);
+        var match = results.FirstOrDefault();
+
+        if (match != null && !string.IsNullOrEmpty(match.Isbn))
+        {
+            var detailed = await GetBookByIsbnAsync(match.Isbn);
+            if (detailed != null) return detailed;
+        }
+
+        return match;
+    }
+
+    // -------------------------------------------------------
+    // By real ISBN
+    // -------------------------------------------------------
     public async Task<BookSearchResultDto?> GetBookByIsbnAsync(string isbn)
     {
         var result = new BookSearchResultDto { Isbn = isbn };
 
-        // 1. Fetch from Open Library
-        var response = await _httpClient.GetAsync($"isbn/{isbn}.json");
-
-        if (response.IsSuccessStatusCode)
-        {
-            var json = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            result.Title = root.TryGetProperty("title", out var t) ? t.GetString() ?? "Unknown Title" : "Unknown Title";
-            result.PageCount = root.TryGetProperty("number_of_pages", out var pages) && pages.ValueKind == JsonValueKind.Number
-                ? pages.GetInt32() : null;
-
-            result.CoverUrl = $"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg";
-
-            // Fetch Author
-            if (root.TryGetProperty("authors", out var authors) && authors.GetArrayLength() > 0)
-            {
-                var authorKey = authors[0].GetProperty("key").GetString();
-                if (!string.IsNullOrEmpty(authorKey))
-                {
-                    var authorResponse = await _httpClient.GetAsync($"{authorKey}.json");
-                    if (authorResponse.IsSuccessStatusCode)
-                    {
-                        var authorJson = await authorResponse.Content.ReadAsStringAsync();
-                        using var authorDoc = JsonDocument.Parse(authorJson);
-                        if (authorDoc.RootElement.TryGetProperty("name", out var nameProp))
-                            result.Author = nameProp.GetString() ?? "Unknown Author";
-                    }
-                }
-            }
-
-            // Fetch Description & Genres (Subjects)
-            if (root.TryGetProperty("works", out var works) && works.GetArrayLength() > 0)
-            {
-                var workKey = works[0].GetProperty("key").GetString();
-                if (!string.IsNullOrEmpty(workKey))
-                {
-                    var workResponse = await _httpClient.GetAsync($"{workKey}.json");
-                    if (workResponse.IsSuccessStatusCode)
-                    {
-                        var workJson = await workResponse.Content.ReadAsStringAsync();
-                        using var workDoc = JsonDocument.Parse(workJson);
-
-                        // Description
-                        if (workDoc.RootElement.TryGetProperty("description", out var descProp))
-                        {
-                            result.Description = descProp.ValueKind == JsonValueKind.String
-                                ? descProp.GetString()
-                                : descProp.TryGetProperty("value", out var valProp) ? valProp.GetString() : null;
-                        }
-
-                        // Genres (Subjects)
-                        if (workDoc.RootElement.TryGetProperty("subjects", out var subjects) && subjects.GetArrayLength() > 0)
-                        {
-                            var genres = subjects.EnumerateArray().Take(3).Select(s => s.GetString());
-                            result.Genres = string.Join(", ", genres);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. FALLBACK: Google Books for missing Author/Description/Genres/Cover
-        if (result.Author == "Unknown Author" || string.IsNullOrEmpty(result.Description) || string.IsNullOrEmpty(result.Genres) || string.IsNullOrEmpty(result.CoverUrl))
-        {
-            await EnrichWithGoogleBooksAsync(isbn, result);
-        }
-
-        // 3. Language Detection (Unicode fallback)
-        if (!string.IsNullOrEmpty(result.Title))
-        {
-            if (result.Title.Any(c => c >= 0x0C80 && c <= 0x0CFF)) result.Language = "kn";      // Kannada
-            else if (result.Title.Any(c => c >= 0x0C00 && c <= 0x0C7F)) result.Language = "te"; // Telugu
-            else if (result.Title.Any(c => c >= 0x0B80 && c <= 0x0BFF)) result.Language = "ta"; // Tamil
-            else result.Language = "en";                                                        // Default English
-        }
-
-        // 🔥 FIX: Do NOT set a placeholder URL. Leave it null so the frontend can generate a gradient cover.
-        // if (string.IsNullOrEmpty(result.CoverUrl))
-        //    result.CoverUrl = "https://via.placeholder.com/300x450?text=No+Cover";
-
-        return result.Title == "Unknown Title" && result.Author == "Unknown Author" ? null : result;
-    }
-
-    private async Task EnrichWithGoogleBooksAsync(string isbn, BookSearchResultDto result)
-    {
-        var googleUrl = $"https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}";
-
         try
         {
-            var response = await _httpClient.GetAsync(googleUrl);
-            if (!response.IsSuccessStatusCode) return;
-
-            var json = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(json);
-
-            if (!doc.RootElement.TryGetProperty("items", out var items) || items.GetArrayLength() == 0)
-                return;
-
-            var volumeInfo = items[0].GetProperty("volumeInfo");
-
-            if (string.IsNullOrEmpty(result.Title) && volumeInfo.TryGetProperty("title", out var title))
-                result.Title = title.GetString() ?? result.Title;
-
-            if (result.Author == "Unknown Author" && volumeInfo.TryGetProperty("authors", out var authors) && authors.GetArrayLength() > 0)
-                result.Author = string.Join(", ", authors.EnumerateArray().Select(a => a.GetString()));
-
-            if (string.IsNullOrEmpty(result.Description) && volumeInfo.TryGetProperty("description", out var desc))
-                result.Description = desc.GetString();
-
-            if (string.IsNullOrEmpty(result.Genres) && volumeInfo.TryGetProperty("categories", out var cats) && cats.GetArrayLength() > 0)
-                result.Genres = string.Join(", ", cats.EnumerateArray().Select(c => c.GetString()));
-
-            if (!result.PageCount.HasValue && volumeInfo.TryGetProperty("pageCount", out var pages) && pages.ValueKind == JsonValueKind.Number)
-                result.PageCount = pages.GetInt32();
-
-            // Fill Cover Image if missing (Google returns a thumbnail)
-            if (string.IsNullOrEmpty(result.CoverUrl) && volumeInfo.TryGetProperty("imageLinks", out var imageLinks))
-            {
-                if (imageLinks.TryGetProperty("thumbnail", out var thumb))
-                {
-                    var url = thumb.GetString();
-                    if (url != null) result.CoverUrl = url.Replace("http://", "https://");
-                }
-            }
-
-            if (string.IsNullOrEmpty(result.Language) && volumeInfo.TryGetProperty("language", out var lang))
-                result.Language = lang.GetString();
-        }
-        catch
-        {
-            // Ignore fallback errors so the app doesn't crash if Google API is down
-        }
-    }
-
-    public async Task<List<BookSearchResultDto>> SearchBooksAsync(string query)
-    {
-        var results = new List<BookSearchResultDto>();
-        try
-        {
-            var url = $"https://openlibrary.org/search.json?q={Uri.EscapeDataString(query)}&limit=12";
+            // Prefer the stable Books API
+            var url = $"https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data";
             var response = await _httpClient.GetAsync(url);
 
             if (response.IsSuccessStatusCode)
@@ -167,62 +72,368 @@ public class OpenLibraryService
                 var json = await response.Content.ReadAsStringAsync();
                 using var doc = JsonDocument.Parse(json);
 
-                if (!doc.RootElement.TryGetProperty("docs", out var docs)) return results;
-
-                foreach (var item in docs.EnumerateArray())
+                var key = $"ISBN:{isbn}";
+                if (doc.RootElement.TryGetProperty(key, out var data))
                 {
-                    string? isbn = item.TryGetProperty("isbn", out var isbns) && isbns.GetArrayLength() > 0 ? isbns[0].GetString() : null;
-                    string? coverUrl = item.TryGetProperty("cover_i", out var coverId) ? $"https://covers.openlibrary.org/b/id/{coverId}-M.jpg" : null;
-                    var title = item.TryGetProperty("title", out var t) ? t.GetString() ?? "Unknown" : "Unknown";
-                    var author = item.TryGetProperty("author_name", out var a) && a.GetArrayLength() > 0 ? a[0].GetString() ?? "Unknown Author" : "Unknown Author";
+                    result.Title = data.TryGetProperty("title", out var t) ? t.GetString() ?? "Unknown Title" : "Unknown Title";
 
-                    var result = new BookSearchResultDto
+                    if (data.TryGetProperty("authors", out var authors) && authors.GetArrayLength() > 0)
+                        result.Author = authors[0].TryGetProperty("name", out var n) ? n.GetString() ?? "Unknown Author" : "Unknown Author";
+
+                    if (data.TryGetProperty("number_of_pages", out var pages) && pages.ValueKind == JsonValueKind.Number)
+                        result.PageCount = pages.GetInt32();
+
+                    if (data.TryGetProperty("cover", out var cover))
                     {
-                        Isbn = isbn,
-                        Title = title,
-                        Author = author,
-                        CoverUrl = coverUrl,
-                        Language = "en"
-                    };
-
-                    // 🔥 SMART SERIES DETECTION 🔥
-
-                    // 1. Check the "series" array if it exists (rare but happens)
-                    if (item.TryGetProperty("series", out var seriesArray) && seriesArray.GetArrayLength() > 0)
-                    {
-                        result.SeriesName = seriesArray[0].GetString()?.Replace("[", "").Replace("]", "").Trim();
+                        if (cover.TryGetProperty("large", out var large))
+                            result.CoverUrl = large.GetString();
+                        else if (cover.TryGetProperty("medium", out var medium))
+                            result.CoverUrl = medium.GetString();
                     }
 
-                    // 2. Check "subject" array for the word "series" or look for a subject ending in "series"
-                    if (string.IsNullOrEmpty(result.SeriesName) && item.TryGetProperty("subject", out var subjects))
+                    if (data.TryGetProperty("subjects", out var subjects) && subjects.GetArrayLength() > 0)
                     {
-                        foreach (var subject in subjects.EnumerateArray())
-                        {
-                            var sub = subject.GetString();
-                            if (sub != null && (sub.EndsWith(" series") || sub.Contains("Series")))
-                            {
-                                // e.g., "The Stormlight Archive series" -> "The Stormlight Archive"
-                                result.SeriesName = Regex.Replace(sub, @"\s*series$", "", RegexOptions.IgnoreCase).Trim();
-                                break;
-                            }
-                        }
+                        var genres = subjects.EnumerateArray()
+                            .Take(4)
+                            .Select(s => s.TryGetProperty("name", out var name) ? name.GetString() : null)
+                            .Where(s => !string.IsNullOrEmpty(s));
+                        result.Genres = string.Join(", ", genres!);
                     }
-
-                    // 3. Fallback: Parse the Title (e.g. "The Way of Kings: Book One of the Stormlight Archive")
-                    if (string.IsNullOrEmpty(result.SeriesName))
-                    {
-                        var seriesMatch = Regex.Match(title, @"(?:Book\s+\d+\s+of\s+(?:the\s+)?)(.*?)(?:$|,|:|\.)", RegexOptions.IgnoreCase);
-                        if (seriesMatch.Success)
-                        {
-                            result.SeriesName = seriesMatch.Groups[1].Value.Trim();
-                        }
-                    }
-
-                    results.Add(result);
                 }
             }
         }
         catch { }
+
+        // Always try to get description from the Work
+        await EnrichFromWorkByIsbnAsync(isbn, result);
+
+        if (string.IsNullOrEmpty(result.CoverUrl))
+            result.CoverUrl = $"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false";
+
+        DetectLanguage(result);
+        return result.Title == "Unknown Title" ? null : result;
+    }
+
+    // -------------------------------------------------------
+    // By Open Library Edition ID (OL...M)
+    // -------------------------------------------------------
+    private async Task<BookSearchResultDto?> GetByOpenLibraryEditionAsync(string olid)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync($"books/{olid}.json");
+            if (!response.IsSuccessStatusCode) return null;
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var result = new BookSearchResultDto
+            {
+                Title = root.TryGetProperty("title", out var t) ? t.GetString() ?? "Unknown Title" : "Unknown Title",
+                PageCount = root.TryGetProperty("number_of_pages", out var p) && p.ValueKind == JsonValueKind.Number
+                    ? p.GetInt32() : null
+            };
+
+            // ISBN
+            if (root.TryGetProperty("isbn_13", out var isbn13) && isbn13.GetArrayLength() > 0)
+                result.Isbn = isbn13[0].GetString();
+            else if (root.TryGetProperty("isbn_10", out var isbn10) && isbn10.GetArrayLength() > 0)
+                result.Isbn = isbn10[0].GetString();
+
+            // Cover
+            if (root.TryGetProperty("covers", out var covers) && covers.GetArrayLength() > 0)
+                result.CoverUrl = $"https://covers.openlibrary.org/b/id/{covers[0].GetInt32()}-L.jpg?default=false";
+
+            // Author
+            if (root.TryGetProperty("authors", out var authors) && authors.GetArrayLength() > 0)
+            {
+                var authorKey = authors[0].GetProperty("key").GetString();
+                if (!string.IsNullOrEmpty(authorKey))
+                {
+                    var authorRes = await _httpClient.GetAsync($"{authorKey}.json");
+                    if (authorRes.IsSuccessStatusCode)
+                    {
+                        var authorJson = await authorRes.Content.ReadAsStringAsync();
+                        using var authorDoc = JsonDocument.Parse(authorJson);
+                        if (authorDoc.RootElement.TryGetProperty("name", out var name))
+                            result.Author = name.GetString() ?? "Unknown Author";
+                    }
+                }
+            }
+
+            // Get description from Work
+            if (root.TryGetProperty("works", out var works) && works.GetArrayLength() > 0)
+            {
+                var workKey = works[0].GetProperty("key").GetString();
+                if (!string.IsNullOrEmpty(workKey))
+                    await EnrichFromWorkKeyAsync(workKey, result);
+            }
+
+            DetectLanguage(result);
+            return result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // -------------------------------------------------------
+    // By Open Library Work ID (OL...W)
+    // -------------------------------------------------------
+    private async Task<BookSearchResultDto?> GetByOpenLibraryWorkAsync(string workId)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync($"works/{workId}.json");
+            if (!response.IsSuccessStatusCode) return null;
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var result = new BookSearchResultDto
+            {
+                Title = root.TryGetProperty("title", out var t) ? t.GetString() ?? "Unknown Title" : "Unknown Title"
+            };
+
+            // Description
+            if (root.TryGetProperty("description", out var descProp))
+            {
+                if (descProp.ValueKind == JsonValueKind.String)
+                    result.Description = descProp.GetString();
+                else if (descProp.TryGetProperty("value", out var val))
+                    result.Description = val.GetString();
+            }
+
+            // Subjects
+            if (root.TryGetProperty("subjects", out var subjects) && subjects.GetArrayLength() > 0)
+            {
+                var genres = subjects.EnumerateArray().Take(4).Select(s => s.GetString()).Where(s => !string.IsNullOrEmpty(s));
+                result.Genres = string.Join(", ", genres!);
+            }
+
+            // Cover
+            if (root.TryGetProperty("covers", out var covers) && covers.GetArrayLength() > 0)
+                result.CoverUrl = $"https://covers.openlibrary.org/b/id/{covers[0].GetInt32()}-L.jpg?default=false";
+
+            // Author
+            if (root.TryGetProperty("authors", out var authors) && authors.GetArrayLength() > 0)
+            {
+                var authorKey = authors[0].GetProperty("author").GetProperty("key").GetString();
+                if (!string.IsNullOrEmpty(authorKey))
+                {
+                    var authorRes = await _httpClient.GetAsync($"{authorKey}.json");
+                    if (authorRes.IsSuccessStatusCode)
+                    {
+                        var authorJson = await authorRes.Content.ReadAsStringAsync();
+                        using var authorDoc = JsonDocument.Parse(authorJson);
+                        if (authorDoc.RootElement.TryGetProperty("name", out var name))
+                            result.Author = name.GetString() ?? "Unknown Author";
+                    }
+                }
+            }
+
+            DetectLanguage(result);
+            return result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // -------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------
+    private async Task EnrichFromWorkByIsbnAsync(string isbn, BookSearchResultDto result)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync($"isbn/{isbn}.json");
+            if (!response.IsSuccessStatusCode) return;
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+
+            if (!doc.RootElement.TryGetProperty("works", out var works) || works.GetArrayLength() == 0)
+                return;
+
+            var workKey = works[0].GetProperty("key").GetString();
+            if (!string.IsNullOrEmpty(workKey))
+                await EnrichFromWorkKeyAsync(workKey, result);
+        }
+        catch { }
+    }
+
+    private async Task EnrichFromWorkKeyAsync(string workKey, BookSearchResultDto result)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync($"{workKey}.json");
+            if (!response.IsSuccessStatusCode) return;
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (string.IsNullOrEmpty(result.Description) && root.TryGetProperty("description", out var descProp))
+            {
+                if (descProp.ValueKind == JsonValueKind.String)
+                    result.Description = descProp.GetString();
+                else if (descProp.TryGetProperty("value", out var val))
+                    result.Description = val.GetString();
+            }
+
+            if (string.IsNullOrEmpty(result.Genres) && root.TryGetProperty("subjects", out var subjects) && subjects.GetArrayLength() > 0)
+            {
+                var genres = subjects.EnumerateArray().Take(4).Select(s => s.GetString()).Where(s => !string.IsNullOrEmpty(s));
+                result.Genres = string.Join(", ", genres!);
+            }
+        }
+        catch { }
+    }
+
+    public async Task<List<BookSearchResultDto>> SearchBooksAsync(string query)
+    {
+        var results = new List<BookSearchResultDto>();
+        try
+        {
+            var url = $"search.json?q={Uri.EscapeDataString(query)}&limit=12";
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return results;
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+
+            if (!doc.RootElement.TryGetProperty("docs", out var docs)) return results;
+
+            foreach (var item in docs.EnumerateArray())
+            {
+                string? isbn = item.TryGetProperty("isbn", out var isbns) && isbns.GetArrayLength() > 0
+                    ? isbns[0].GetString() : null;
+
+                string? coverUrl = item.TryGetProperty("cover_i", out var coverId)
+                    ? $"https://covers.openlibrary.org/b/id/{coverId.GetInt32()}-M.jpg?default=false"
+                    : null;
+
+                var title = item.TryGetProperty("title", out var t) ? t.GetString() ?? "Unknown" : "Unknown";
+                var author = item.TryGetProperty("author_name", out var a) && a.GetArrayLength() > 0
+                    ? a[0].GetString() ?? "Unknown Author" : "Unknown Author";
+
+                var result = new BookSearchResultDto
+                {
+                    Isbn = isbn,
+                    Title = title,
+                    Author = author,
+                    CoverUrl = coverUrl,
+                    Language = "en"
+                };
+
+                // Series detection
+                if (item.TryGetProperty("series", out var seriesArray) && seriesArray.GetArrayLength() > 0)
+                    result.SeriesName = seriesArray[0].GetString()?.Replace("[", "").Replace("]", "").Trim();
+
+                results.Add(result);
+            }
+        }
+        catch { }
+
         return results;
+    }
+
+    public async Task<List<BookSearchResultDto>> DiscoverBooksAsync(string subject)
+    {
+        var results = new List<BookSearchResultDto>();
+        try
+        {
+            var url = $"subjects/{Uri.EscapeDataString(subject.ToLower())}.json?limit=20";
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return results;
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+
+            if (!doc.RootElement.TryGetProperty("works", out var works)) return results;
+
+            foreach (var item in works.EnumerateArray())
+            {
+                var title = item.TryGetProperty("title", out var t) ? t.GetString() : "Unknown";
+                var author = "Unknown Author";
+                string? coverUrl = item.TryGetProperty("cover_id", out var coverId)
+                    ? $"https://covers.openlibrary.org/b/id/{coverId.GetInt32()}-M.jpg?default=false"
+                    : null;
+
+                if (item.TryGetProperty("authors", out var authors) && authors.GetArrayLength() > 0)
+                    author = authors[0].TryGetProperty("name", out var a) ? a.GetString() ?? "Unknown Author" : "Unknown Author";
+
+                if (!string.IsNullOrEmpty(title) && title != "Unknown")
+                {
+                    results.Add(new BookSearchResultDto
+                    {
+                        Title = title!,
+                        Author = author,
+                        CoverUrl = coverUrl,
+                        Language = "en",
+                        Genres = subject
+                    });
+                }
+            }
+        }
+        catch { }
+
+        return results;
+    }
+
+    public async Task<List<BookSearchResultDto>> GetRecommendationsForUserAsync(AppDbContext db, Guid userId)
+    {
+        var topGenres = await db.UserBooks
+            .Where(ub => ub.UserId == userId && ub.Book.Genres != null)
+            .Select(ub => ub.Book.Genres)
+            .ToListAsync();
+
+        var genreList = topGenres
+            .SelectMany(g => g!.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            .Select(g => g.Trim().ToLower())
+            .GroupBy(g => g)
+            .OrderByDescending(g => g.Count())
+            .Take(2)
+            .Select(g => g.Key)
+            .ToList();
+
+        if (!genreList.Any()) return new();
+
+        var recommendations = new List<BookSearchResultDto>();
+        foreach (var genre in genreList)
+            recommendations.AddRange(await DiscoverBooksAsync(genre));
+
+        var ownedIsbns = await db.UserBooks
+            .Where(ub => ub.UserId == userId && ub.Book.Isbn != null)
+            .Select(ub => ub.Book.Isbn)
+            .ToListAsync();
+
+        return recommendations
+            .Where(r => r.Isbn == null || !ownedIsbns.Contains(r.Isbn))
+            .DistinctBy(r => r.Title)
+            .Take(20)
+            .ToList();
+    }
+
+    private static void DetectLanguage(BookSearchResultDto result)
+    {
+        if (string.IsNullOrEmpty(result.Title))
+        {
+            result.Language = "en";
+            return;
+        }
+
+        if (result.Title.Any(c => c is >= '\u0C80' and <= '\u0CFF')) result.Language = "kn";
+        else if (result.Title.Any(c => c is >= '\u0C00' and <= '\u0C7F')) result.Language = "te";
+        else if (result.Title.Any(c => c is >= '\u0B80' and <= '\u0BFF')) result.Language = "ta";
+        else if (result.Title.Any(c => c is >= '\u0900' and <= '\u097F')) result.Language = "hi";
+        else if (result.Title.Any(c => c is >= '\u0980' and <= '\u09FF')) result.Language = "bn";
+        else if (result.Title.Any(c => c is >= '\u0D00' and <= '\u0D7F')) result.Language = "ml";
+        else result.Language ??= "en";
     }
 }

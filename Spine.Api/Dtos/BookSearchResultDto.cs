@@ -12,4 +12,5 @@ public class BookSearchResultDto
     public string? Language { get; set; }
     public string? SeriesName { get; set; }
     public int? SeriesPosition { get; set; }
+    public int? PublishYear { get; set; }
 }

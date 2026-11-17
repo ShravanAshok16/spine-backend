@@ -170,6 +170,28 @@ PART 6 — PROBLEMS FACED AND HOW WE FIXED THEM
     - Cause: `Tag.cs` and `UserBookTag.cs` were missing.
     - Fix: Created the files and configured the Explicit Join Entity in `AppDbContext`.
 
+
+--- PART 1: CORE ARCHITECTURE ---
+1. **Global Catalog:** `Books` table is shared. `UserBooks` links users to books. Prevents duplicate data.
+2. **Soft Deletes:** `UserBooks` uses `IsDeleted`. We don't hard-delete user data immediately.
+3. **Self-Referencing Graph:** `Friendships` has two FKs to Users (`RequesterId`, `ReceiverId`).
+4. **Event-Driven:** Kafka used for async emails and activity fan-out.
+
+--- PART 2: SPRINT 8 (DAY 8) RESILIENCE & DISCOVERY ---
+- **Provider Pattern:** `BookLookupService` orchestrates `OpenLibraryProvider` and `GoogleBooksProvider`. 
+- **Google Books Priority:** Reversed logic to hit Google Books first because it has better descriptions and covers.
+- **Caching:** Used `IMemoryCache`. Caches complete books for 12 hours, incomplete ones for 45 seconds (so the "Try Again" button works).
+- **IPv4 Fix:** Created `Ipv4HttpHandler.cs`. This bypasses the Windows IPv6 DNS bug that caused OpenLibrary to hang for 19 seconds.
+- **Data Cleanup:** Added `TextCleaner` to strip HTML tags (from Google) and dashes (from OpenLibrary).
+- **High-Res Covers:** Appended `zoom=3` to Google covers and `?default=false` to OpenLibrary covers (forces 404 on missing images).
+
+--- PART 3: PROBLEMS & FIXES ---
+1. **429 Rate Limits:** Caused by missing API key. Fixed by adding to User Secrets.
+2. **19-Second API Hangs:** Caused by Windows IPv6 timeouts. Fixed with `Ipv4HttpHandler` + 10s timeout.
+3. **Missing Descriptions:** OpenLibrary returned partial data. Fixed by prioritizing Google Books and adding the "Try Again" button on the frontend.
+4. **Book Not Found:** Caused by sending internal GUIDs to external APIs. Fixed by using the local `ISBN` or `Title` for external lookups.
+=====================================================================
+
 =====================================================================
 END OF NOTES
 =====================================================================

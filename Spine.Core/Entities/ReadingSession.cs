@@ -12,4 +12,5 @@ public class ReadingSession
     public DateTime? EndedAt { get; set; }
     public int PagesRead { get; set; } = 0;
     public string? Notes { get; set; }
+    public string? Mood { get; set; }
 }

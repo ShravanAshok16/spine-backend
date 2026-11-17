@@ -147,14 +147,17 @@ public class UserBooksController : ControllerBase
                 LentTo = ub.LentTo,
                 AddedAt = ub.AddedAt,
                 IsFavourite = ub.IsFavourite,
-                Ownership = ub.Ownership.ToString()
+                Ownership = ub.Ownership.ToString(),
+                Isbn = ub.Book.Isbn,
+                Description = ub.Book.Description,
+                PageCount = ub.Book.PageCount
             })
             .ToListAsync();
 
         return Ok(library);
     }
 
-    [HttpGet("{id:guid}")]
+        [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetUserBook(Guid id)
     {
         var userId = GetCurrentUserId();
@@ -176,9 +179,9 @@ public class UserBooksController : ControllerBase
             CoverUrl = userBook.Book.CoverUrl,
             Status = userBook.Status,
             CurrentPage = userBook.CurrentPage,
-            TotalPages = userBook.Book.PageCount, // <-- Added
-            Language = userBook.Book.Language,    // <-- Added
-            Genres = userBook.Book.Genres,        // <-- Added
+            TotalPages = userBook.Book.PageCount, 
+            Language = userBook.Book.Language,    
+            Genres = userBook.Book.Genres,        
             SeriesId = userBook.Book.SeriesId,
             SeriesName = userBook.Book.Series != null ? userBook.Book.Series.Name : null,
             PersonalRating = userBook.PersonalRating,
@@ -186,7 +189,13 @@ public class UserBooksController : ControllerBase
             LentTo = userBook.LentTo,
             AddedAt = userBook.AddedAt,
             IsFavourite = userBook.IsFavourite,
-            Ownership = userBook.Ownership.ToString()
+            Isbn = userBook.Book.Isbn,
+            Ownership = userBook.Ownership.ToString(),
+            
+            // 🔥 ADD THESE LINES:
+            Description = userBook.Book.Description,
+            PageCount = userBook.Book.PageCount,
+            PublishYear = userBook.Book.PublishYear // If you have this field
         });
     }
 
@@ -436,5 +445,32 @@ public class UserBooksController : ControllerBase
 
         await _db.SaveChangesAsync();
         return Ok(new { message = $"Linked {userBooks.Count} books to {series.Name}." });
+    }
+
+    public class LogSessionRequest { public int PagesRead { get; set; } public string? Mood { get; set; } }
+
+    [HttpPost("{id:guid}/sessions")]
+    public async Task<IActionResult> LogSession(Guid id, [FromBody] LogSessionRequest request)
+    {
+        var userId = GetCurrentUserId();
+        var book = await _db.UserBooks.Include(ub => ub.Book).FirstOrDefaultAsync(ub => ub.Id == id && ub.UserId == userId);
+        if (book == null) return NotFound();
+
+        var session = new ReadingSession
+        {
+            UserBookId = book.Id,
+            PagesRead = request.PagesRead,
+            Mood = request.Mood,
+            EndedAt = DateTime.UtcNow
+        };
+
+        // Update total pages progress
+        book.CurrentPage = Math.Min(book.CurrentPage + request.PagesRead, book.Book.PageCount ?? 9999);
+        if (book.CurrentPage >= (book.Book.PageCount ?? 9999)) book.Status = "Finished";
+
+        _db.ReadingSessions.Add(session);
+        await _db.SaveChangesAsync();
+
+        return Ok(new { currentPage = book.CurrentPage, status = book.Status });
     }
 }
