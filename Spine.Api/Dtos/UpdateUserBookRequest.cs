@@ -7,4 +7,5 @@ public class UpdateUserBookRequest
     public int? PersonalRating { get; set; } // 1-5
     public string? PrivateNotes { get; set; }
     public string? LentTo { get; set; }
+    public string? Ownership { get; set; } 
 }

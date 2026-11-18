@@ -21,10 +21,7 @@ public class GoogleBooksService
 
     public async Task<BookSearchResultDto?> GetByIdentifierAsync(string identifier, string? language = null)
     {
-        var query = identifier.Length >= 10 && identifier.All(char.IsDigit) 
-            ? $"isbn:{identifier}" 
-            : identifier;
-            
+        var query = identifier.Length >= 10 && identifier.All(char.IsDigit) ? $"isbn:{identifier}" : identifier;
         var results = await SearchAsync(query, 1, language);
         return results.FirstOrDefault();
     }
@@ -35,23 +32,14 @@ public class GoogleBooksService
         try
         {
             var url = $"volumes?q={Uri.EscapeDataString(query)}&maxResults={limit}";
-            
-            if (!string.IsNullOrEmpty(_apiKey))
-                url += $"&key={_apiKey}";
-
-            if (!string.IsNullOrEmpty(language) && language != "en")
-                url += $"&langRestrict={language}";
+            if (!string.IsNullOrEmpty(_apiKey)) url += $"&key={_apiKey}";
+            if (!string.IsNullOrEmpty(language) && language != "en") url += $"&langRestrict={language}";
 
             var response = await _httpClient.GetAsync(url);
-            if (!response.IsSuccessStatusCode) 
-            {
-                _logger.LogWarning("GoogleBooks API returned {StatusCode} for query: {Query}", response.StatusCode, query);
-                return results;
-            }
+            if (!response.IsSuccessStatusCode) return results;
 
             var json = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
-
             if (!doc.RootElement.TryGetProperty("items", out var items)) return results;
 
             foreach (var item in items.EnumerateArray())
@@ -64,31 +52,30 @@ public class GoogleBooksService
                     foreach (var id in ids.EnumerateArray())
                     {
                         var type = id.GetProperty("type").GetString();
-                        if (type is "ISBN_13" or "ISBN_10") 
-                        { 
-                            isbn = id.GetProperty("identifier").GetString(); 
-                            break; 
-                        }
+                        if (type is "ISBN_13" or "ISBN_10") { isbn = id.GetProperty("identifier").GetString(); break; }
                     }
                 }
 
+                // 🔥 FIX: Extract highest quality available, but DO NOT modify the URL
                 string? cover = null;
                 if (volume.TryGetProperty("imageLinks", out var images))
                 {
-                    if (images.TryGetProperty("thumbnail", out var thumb))
+                    if (images.TryGetProperty("extraLarge", out var xl)) cover = xl.GetString();
+                    else if (images.TryGetProperty("large", out var l)) cover = l.GetString();
+                    else if (images.TryGetProperty("medium", out var m)) cover = m.GetString();
+                    else if (images.TryGetProperty("thumbnail", out var thumb)) cover = thumb.GetString();
+                    else if (images.TryGetProperty("smallThumbnail", out var st)) cover = st.GetString();
+
+                    if (cover != null)
                     {
-                        // 🔥 UPGRADE GOOGLE COVER RESOLUTION
-                        cover = thumb.GetString()?
-                            .Replace("http://", "https://")
-                            .Replace("&edge=curl", "")
-                            .Replace("zoom=1", "zoom=3"); // Request higher resolution
+                        // Only replace http with https. Leave the zoom parameter alone so it doesn't break.
+                        cover = cover.Replace("http://", "https://");
                     }
                 }
 
-                var author = volume.TryGetProperty("authors", out var authArr) && authArr.GetArrayLength() > 0
-                    ? authArr[0].GetString()
-                    : "Unknown Author";
+                if (CoverHelper.IsPlaceholder(cover)) cover = null;
 
+                var author = volume.TryGetProperty("authors", out var authArr) && authArr.GetArrayLength() > 0 ? authArr[0].GetString() : "Unknown Author";
                 var detectedLang = volume.TryGetProperty("language", out var lang) ? lang.GetString() : "en";
 
                 results.Add(new BookSearchResultDto
@@ -100,9 +87,7 @@ public class GoogleBooksService
                     Description = volume.TryGetProperty("description", out var d) ? d.GetString() : null,
                     PageCount = volume.TryGetProperty("pageCount", out var p) ? p.GetInt32() : null,
                     Language = detectedLang,
-                    Genres = volume.TryGetProperty("categories", out var cats) && cats.GetArrayLength() > 0
-                        ? string.Join(", ", cats.EnumerateArray().Select(c => c.GetString()))
-                        : null
+                    Genres = volume.TryGetProperty("categories", out var cats) && cats.GetArrayLength() > 0 ? string.Join(", ", cats.EnumerateArray().Select(c => c.GetString())) : null
                 });
             }
         }
@@ -110,7 +95,6 @@ public class GoogleBooksService
         {
             _logger.LogError(ex, "GoogleBooks API threw an exception for query: {Query}", query);
         }
-
         return results;
     }
 }

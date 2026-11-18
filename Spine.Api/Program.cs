@@ -95,6 +95,8 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var app = builder.Build();
+var memoryCache = app.Services.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
+CoverHelper.Configure(memoryCache);
 
 // ==========================================
 // MIDDLEWARE PIPELINE (Order matters!)

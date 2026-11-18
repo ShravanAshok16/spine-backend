@@ -57,11 +57,20 @@ public class UserBooksController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
-        var alreadyOwned = await _db.UserBooks
-            .AnyAsync(ub => ub.UserId == userId && ub.BookId == existingBook.Id);
+        var existingUserBook = await _db.UserBooks
+            .FirstOrDefaultAsync(ub => ub.UserId == userId && ub.BookId == existingBook.Id);
 
-        if (alreadyOwned)
+        if (existingUserBook != null)
+        {
+            if (existingUserBook.IsDeleted)
+            {
+                existingUserBook.IsDeleted = false;
+                existingUserBook.DeletedAt = null;
+                await _db.SaveChangesAsync();
+                return Ok(new { message = "Book restored to library.", userBookId = existingUserBook.Id, title = existingBook.Title });
+            }
             return BadRequest(new { message = "You already have this book in your library." });
+        }
 
         var userBook = new UserBook
         {
@@ -75,6 +84,86 @@ public class UserBooksController : ControllerBase
         await _db.SaveChangesAsync();
 
         return Ok(new { message = "Book added to library successfully.", userBookId = userBook.Id, title = existingBook.Title });
+    }
+
+    [HttpPost("manual")]
+    public async Task<IActionResult> AddBookManually([FromBody] AddBookManuallyRequest request)
+    {
+        var userId = GetCurrentUserId();
+
+        var existingBook = await _db.Books.FirstOrDefaultAsync(b =>
+            (!string.IsNullOrEmpty(request.Isbn) && b.Isbn == request.Isbn) ||
+            (b.Title.ToLower() == request.Title.ToLower() && b.Author.ToLower() == request.Author.ToLower()));
+
+        Book book;
+
+        if (existingBook != null)
+        {
+            book = existingBook;
+        }
+        else
+        {
+            Guid? seriesId = null;
+            if (!string.IsNullOrEmpty(request.SeriesName))
+            {
+                var existingSeries = await _db.Series.FirstOrDefaultAsync(s => s.Name.ToLower() == request.SeriesName.ToLower());
+                if (existingSeries != null)
+                {
+                    seriesId = existingSeries.Id;
+                }
+                else
+                {
+                    var newSeries = new Series { Name = request.SeriesName };
+                    _db.Series.Add(newSeries);
+                    await _db.SaveChangesAsync();
+                    seriesId = newSeries.Id;
+                }
+            }
+
+            book = new Book
+            {
+                Title = request.Title,
+                Author = request.Author,
+                Language = request.Language,
+                Isbn = request.Isbn,
+                Description = request.Description,
+                PageCount = request.PageCount,
+                Genres = request.Genres,
+                CoverUrl = request.CoverUrl,
+                SeriesId = seriesId,
+                SeriesPosition = request.SeriesPosition
+            };
+            _db.Books.Add(book);
+            await _db.SaveChangesAsync();
+        }
+
+        var existingUserBook = await _db.UserBooks
+            .FirstOrDefaultAsync(ub => ub.UserId == userId && ub.BookId == book.Id);
+
+        if (existingUserBook != null)
+        {
+            if (existingUserBook.IsDeleted)
+            {
+                existingUserBook.IsDeleted = false;
+                existingUserBook.DeletedAt = null;
+                await _db.SaveChangesAsync();
+                return Ok(new { message = "Book restored to library." });
+            }
+            return BadRequest(new { message = "You already have this book." });
+        }
+
+        var userBook = new UserBook
+        {
+            UserId = userId,
+            BookId = book.Id,
+            Status = "Unread",
+            AddedAt = DateTime.UtcNow
+        };
+
+        _db.UserBooks.Add(userBook);
+        await _db.SaveChangesAsync();
+
+        return Ok(new { message = "Book added successfully." });
     }
 
     [HttpGet]
@@ -95,7 +184,6 @@ public class UserBooksController : ControllerBase
             .Include(ub => ub.Book.Series)
             .AsQueryable();
 
-        // 1. Filters
         if (!string.IsNullOrWhiteSpace(status))
             query = query.Where(ub => ub.Status.ToLower() == status.ToLower());
 
@@ -116,7 +204,6 @@ public class UserBooksController : ControllerBase
         if (!string.IsNullOrWhiteSpace(tag))
             query = query.Where(ub => ub.Tags.Any(ubt => ubt.Tag.Name.ToLower() == tag.ToLower()));
 
-        // 2. Sorting
         query = sort switch
         {
             "title_asc" => query.OrderBy(ub => ub.Book.Title),
@@ -126,7 +213,6 @@ public class UserBooksController : ControllerBase
             _ => query.OrderByDescending(ub => ub.AddedAt)
         };
 
-        // 3. Projection
         var library = await query
             .Select(ub => new UserBookResponse
             {
@@ -137,9 +223,9 @@ public class UserBooksController : ControllerBase
                 CoverUrl = ub.Book.CoverUrl,
                 Status = ub.Status,
                 CurrentPage = ub.CurrentPage,
-                TotalPages = ub.Book.PageCount, // <-- Added
-                Language = ub.Book.Language,    // <-- Added
-                Genres = ub.Book.Genres,        // <-- Added
+                TotalPages = ub.Book.PageCount,
+                Language = ub.Book.Language,
+                Genres = ub.Book.Genres,
                 SeriesId = ub.Book.SeriesId,
                 SeriesName = ub.Book.Series != null ? ub.Book.Series.Name : null,
                 PersonalRating = ub.PersonalRating,
@@ -157,7 +243,7 @@ public class UserBooksController : ControllerBase
         return Ok(library);
     }
 
-        [HttpGet("{id:guid}")]
+    [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetUserBook(Guid id)
     {
         var userId = GetCurrentUserId();
@@ -179,9 +265,9 @@ public class UserBooksController : ControllerBase
             CoverUrl = userBook.Book.CoverUrl,
             Status = userBook.Status,
             CurrentPage = userBook.CurrentPage,
-            TotalPages = userBook.Book.PageCount, 
-            Language = userBook.Book.Language,    
-            Genres = userBook.Book.Genres,        
+            TotalPages = userBook.Book.PageCount,
+            Language = userBook.Book.Language,
+            Genres = userBook.Book.Genres,
             SeriesId = userBook.Book.SeriesId,
             SeriesName = userBook.Book.Series != null ? userBook.Book.Series.Name : null,
             PersonalRating = userBook.PersonalRating,
@@ -191,11 +277,9 @@ public class UserBooksController : ControllerBase
             IsFavourite = userBook.IsFavourite,
             Isbn = userBook.Book.Isbn,
             Ownership = userBook.Ownership.ToString(),
-            
-            // 🔥 ADD THESE LINES:
             Description = userBook.Book.Description,
             PageCount = userBook.Book.PageCount,
-            PublishYear = userBook.Book.PublishYear // If you have this field
+            PublishYear = userBook.Book.PublishYear
         });
     }
 
@@ -204,7 +288,6 @@ public class UserBooksController : ControllerBase
     {
         var userId = GetCurrentUserId();
 
-        // 🔥 FIX: Added .Include(ub => ub.Book)
         var userBook = await _db.UserBooks
             .Include(ub => ub.Book)
             .FirstOrDefaultAsync(ub => ub.Id == id && ub.UserId == userId && !ub.IsDeleted);
@@ -218,7 +301,12 @@ public class UserBooksController : ControllerBase
         userBook.PrivateNotes = request.PrivateNotes;
         userBook.LentTo = request.LentTo;
 
-        // Auto-complete page count if finished
+        if (!string.IsNullOrEmpty(request.Ownership) && 
+            Enum.TryParse<Spine.Core.Enums.OwnershipStatus>(request.Ownership, true, out var parsedOwnership))
+        {
+            userBook.Ownership = parsedOwnership;
+        }
+
         if (request.Status == "Finished" && userBook.Book.PageCount.HasValue)
         {
             userBook.CurrentPage = userBook.Book.PageCount.Value;
@@ -253,76 +341,6 @@ public class UserBooksController : ControllerBase
         return NoContent();
     }
 
-    [HttpPost("manual")]
-    public async Task<IActionResult> AddBookManually([FromBody] AddBookManuallyRequest request)
-    {
-        var userId = GetCurrentUserId();
-
-        // 1. Check for duplicates
-        var existingBook = await _db.Books.FirstOrDefaultAsync(b =>
-            (!string.IsNullOrEmpty(request.Isbn) && b.Isbn == request.Isbn) ||
-            (b.Title.ToLower() == request.Title.ToLower() && b.Author.ToLower() == request.Author.ToLower()));
-
-        Book book;
-
-        if (existingBook != null)
-        {
-            var alreadyOwned = await _db.UserBooks.AnyAsync(ub => ub.UserId == userId && ub.BookId == existingBook.Id);
-            if (alreadyOwned) return BadRequest(new { message = "You already have this book." });
-            book = existingBook;
-        }
-        else
-        {
-            // 2. Handle Series Creation
-            Guid? seriesId = null;
-            if (!string.IsNullOrEmpty(request.SeriesName))
-            {
-                var existingSeries = await _db.Series.FirstOrDefaultAsync(s => s.Name.ToLower() == request.SeriesName.ToLower());
-                if (existingSeries != null)
-                {
-                    seriesId = existingSeries.Id;
-                }
-                else
-                {
-                    var newSeries = new Series { Name = request.SeriesName };
-                    _db.Series.Add(newSeries);
-                    await _db.SaveChangesAsync();
-                    seriesId = newSeries.Id;
-                }
-            }
-
-            // 3. Create Book
-            book = new Book
-            {
-                Title = request.Title,
-                Author = request.Author,
-                Language = request.Language,
-                Isbn = request.Isbn,
-                Description = request.Description,
-                PageCount = request.PageCount,
-                Genres = request.Genres,
-                CoverUrl = request.CoverUrl,
-                SeriesId = seriesId,                     // <-- Save Series
-                SeriesPosition = request.SeriesPosition  // <-- Save Position
-            };
-            _db.Books.Add(book);
-            await _db.SaveChangesAsync();
-        }
-
-        var userBook = new UserBook
-        {
-            UserId = userId,
-            BookId = book.Id,
-            Status = "Unread",
-            AddedAt = DateTime.UtcNow
-        };
-
-        _db.UserBooks.Add(userBook);
-        await _db.SaveChangesAsync();
-
-        return Ok(new { message = "Book added successfully." });
-    }
-
     private Guid GetCurrentUserId()
     {
         var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
@@ -344,7 +362,6 @@ public class UserBooksController : ControllerBase
 
         if (userBook is null) return NotFound();
 
-        // Soft delete
         userBook.IsDeleted = true;
         userBook.DeletedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
@@ -352,11 +369,8 @@ public class UserBooksController : ControllerBase
         return NoContent();
     }
 
-    // 1. DTOs for the new endpoints
     public class BatchDeleteRequest { public List<Guid> UserBookIds { get; set; } = new(); }
     public class UpdateProgressRequest { public int CurrentPage { get; set; } }
-
-    // 3. New Endpoints:
 
     [HttpPost("batch-delete")]
     public async Task<IActionResult> BatchDelete([FromBody] BatchDeleteRequest request)
@@ -399,7 +413,6 @@ public class UserBooksController : ControllerBase
 
         book.CurrentPage = request.CurrentPage;
 
-        // Auto-finish logic
         if (book.Book.PageCount.HasValue && book.CurrentPage >= book.Book.PageCount.Value)
         {
             book.CurrentPage = book.Book.PageCount.Value;
@@ -410,7 +423,6 @@ public class UserBooksController : ControllerBase
         return Ok(new { currentPage = book.CurrentPage, status = book.Status });
     }
 
-    // Add this DTO at the bottom of the class (next to the other DTOs):
     public class LinkSeriesRequest
     {
         public string SeriesName { get; set; } = string.Empty;
@@ -422,7 +434,6 @@ public class UserBooksController : ControllerBase
     {
         var userId = GetCurrentUserId();
 
-        // 1. Find or create the Series
         var series = await _db.Series.FirstOrDefaultAsync(s => s.Name.ToLower() == request.SeriesName.ToLower());
         if (series == null)
         {
@@ -431,13 +442,11 @@ public class UserBooksController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
-        // 2. Get the books belonging to the user
         var userBooks = await _db.UserBooks
             .Include(ub => ub.Book)
             .Where(ub => request.BookIds.Contains(ub.BookId) && ub.UserId == userId)
             .ToListAsync();
 
-        // 3. Link them to the Series
         foreach (var ub in userBooks)
         {
             ub.Book.SeriesId = series.Id;
@@ -464,7 +473,6 @@ public class UserBooksController : ControllerBase
             EndedAt = DateTime.UtcNow
         };
 
-        // Update total pages progress
         book.CurrentPage = Math.Min(book.CurrentPage + request.PagesRead, book.Book.PageCount ?? 9999);
         if (book.CurrentPage >= (book.Book.PageCount ?? 9999)) book.Status = "Finished";
 
@@ -473,4 +481,24 @@ public class UserBooksController : ControllerBase
 
         return Ok(new { currentPage = book.CurrentPage, status = book.Status });
     }
+
+    [HttpGet("sessions/stats")]
+    public async Task<IActionResult> GetSessionStats()
+    {
+        var userId = GetCurrentUserId();
+        var startDate = DateTime.UtcNow.AddDays(-35);
+        
+        var stats = await _db.ReadingSessions
+            .Where(s => s.UserBook.UserId == userId && s.StartedAt >= startDate)
+            .GroupBy(s => s.StartedAt.Date)
+            .Select(g => new { 
+                Date = g.Key.ToString("yyyy-MM-dd"), 
+                PagesRead = g.Sum(s => s.PagesRead) 
+            })
+            .ToListAsync();
+
+        return Ok(stats);
+    }
+
+    
 }
