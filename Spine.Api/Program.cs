@@ -9,6 +9,10 @@ using Serilog;
 using Spine.Api.Services;
 using Spine.Api.Validators;
 using Spine.Infrastructure.Data;
+using Spine.Infrastructure.Services;
+using Microsoft.Extensions.Caching.Distributed;
+// ✅ This using directive provides the AddStackExchangeRedisCache extension method
+using Microsoft.Extensions.DependencyInjection; 
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,30 +27,54 @@ if (!builder.Environment.IsEnvironment("Testing"))
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<KafkaProducerService>();
 
-// 🔥 3. External Book APIs (FORCING IPV4 & TIMEOUTS)
+// 3. External APIs
 builder.Services.AddHttpClient<OpenLibraryService>()
     .ConfigurePrimaryHttpMessageHandler(() => Ipv4HttpHandler.Create())
-    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(10)); // 🔥 Added Timeout
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(10));
 
 builder.Services.AddHttpClient<GoogleBooksService>()
     .ConfigurePrimaryHttpMessageHandler(() => Ipv4HttpHandler.Create())
-    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(10)); // 🔥 Added Timeout
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(10));
+
+builder.Services.AddHttpClient<QuoteService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+    client.DefaultRequestHeaders.Add("User-Agent", "Spine/1.0");
+});
+
+// 4. Caching (Redis with In-Memory fallback)
+var redisConn = builder.Configuration["Redis:ConnectionString"];
+if (!string.IsNullOrEmpty(redisConn) && !redisConn.Contains("localhost"))
+{
+    // ✅ This method is now available because the NuGet package is installed
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConn;
+        options.InstanceName = "Spine:";
+    });
+    Console.WriteLine("✅ Redis cache enabled");
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+    Console.WriteLine("⚠️ Using in-memory distributed cache (dev mode)");
+}
 
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<BookLookupService>();
 
-// 4. CORS Policy
+// 5. CORS Policy
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
+        policy.WithOrigins("http://localhost:5173", "https://your-spine.vercel.app")
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
 });
 
-// 5. JWT Auth
+// 6. JWT Auth
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -65,16 +93,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
-// 6. Logging
+// 7. Logging
 builder.Host.UseSerilog((ctx, cfg) =>
     cfg.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 
-// 7. Controllers & Validation
+// 8. Controllers & Validation
 builder.Services.AddControllers();
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 
-// 8. Swagger
+// 9. Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -99,7 +127,7 @@ var memoryCache = app.Services.GetRequiredService<Microsoft.Extensions.Caching.M
 CoverHelper.Configure(memoryCache);
 
 // ==========================================
-// MIDDLEWARE PIPELINE (Order matters!)
+// MIDDLEWARE PIPELINE
 // ==========================================
 
 if (app.Environment.IsDevelopment())
@@ -109,11 +137,14 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseSerilogRequestLogging();
-app.UseHttpsRedirection();
 
-// Apply CORS before auth
+// Only redirect to HTTPS in production
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
 app.UseCors("AllowFrontend");
-
 app.UseAuthentication();
 app.UseAuthorization();
 

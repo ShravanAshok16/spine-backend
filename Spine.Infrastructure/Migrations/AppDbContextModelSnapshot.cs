@@ -310,7 +310,8 @@ namespace Spine.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("Bio")
-                        .HasColumnType("text");
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -354,7 +355,15 @@ namespace Spine.Infrastructure.Migrations
 
                     b.Property<string>("PrivacySetting")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("PublicUsername")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("YearlyGoal")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
@@ -548,11 +557,11 @@ namespace Spine.Infrastructure.Migrations
                     b.HasOne("Spine.Core.Entities.Book", "Book")
                         .WithMany()
                         .HasForeignKey("BookId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Spine.Core.Entities.User", "User")
-                        .WithMany()
+                        .WithMany("UserBooks")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -589,6 +598,11 @@ namespace Spine.Infrastructure.Migrations
             modelBuilder.Entity("Spine.Core.Entities.Tag", b =>
                 {
                     b.Navigation("UserBookTags");
+                });
+
+            modelBuilder.Entity("Spine.Core.Entities.User", b =>
+                {
+                    b.Navigation("UserBooks");
                 });
 
             modelBuilder.Entity("Spine.Core.Entities.UserBook", b =>

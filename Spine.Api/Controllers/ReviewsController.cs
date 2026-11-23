@@ -43,6 +43,10 @@ public class ReviewsController : ControllerBase
         if (request.Rating < 1 || request.Rating > 5)
             return BadRequest(new { message = "Rating must be between 1 and 5." });
 
+        // 🔥 SAFETY CHECK: Ensure the global Book exists before inserting
+        if (!await _db.Books.AnyAsync(b => b.Id == bookId))
+            return BadRequest(new { message = "Book not found in global database." });
+
         var userId = GetCurrentUserId();
         var existing = await _db.Reviews.FirstOrDefaultAsync(r => r.BookId == bookId && r.UserId == userId);
 

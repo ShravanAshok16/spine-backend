@@ -1,162 +1,161 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Spine.Core.Entities;
 
-namespace Spine.Infrastructure.Data
+namespace Spine.Infrastructure.Data;
+
+public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
-    public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+    public DbSet<User> Users => Set<User>();
+    public DbSet<Book> Books => Set<Book>();
+    public DbSet<Series> Series => Set<Series>();
+    public DbSet<UserBook> UserBooks => Set<UserBook>();
+    public DbSet<Tag> Tags => Set<Tag>();
+    public DbSet<UserBookTag> UserBookTags => Set<UserBookTag>();
+    public DbSet<ReadingSession> ReadingSessions => Set<ReadingSession>();
+    public DbSet<Review> Reviews => Set<Review>();
+    public DbSet<Friendship> Friendships => Set<Friendship>();
+    public DbSet<Activity> Activities => Set<Activity>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<Quote> Quotes => Set<Quote>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        public DbSet<User> Users => Set<User>();
-        public DbSet<Book> Books => Set<Book>();
-        public DbSet<Series> Series => Set<Series>();
-        public DbSet<UserBook> UserBooks => Set<UserBook>();
-        public DbSet<Tag> Tags => Set<Tag>();
-        public DbSet<UserBookTag> UserBookTags => Set<UserBookTag>(); // 🔥 Added this
-        public DbSet<ReadingSession> ReadingSessions => Set<ReadingSession>(); // 🔥 Added this
-        public DbSet<Review> Reviews => Set<Review>();
-        public DbSet<Friendship> Friendships => Set<Friendship>();
-        public DbSet<Activity> Activities => Set<Activity>();
-        public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
-        public DbSet<Quote> Quotes => Set<Quote>();
-
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        // 1. User
+        modelBuilder.Entity<User>(e =>
         {
-            // 1. User
-            modelBuilder.Entity<User>(e =>
-            {
-                e.HasKey(x => x.Id);
-                e.HasIndex(x => x.Email).IsUnique();
-                e.Property(x => x.Email).HasMaxLength(256).IsRequired();
-                e.Property(x => x.DisplayName).HasMaxLength(100);
-                e.Property(x => x.FirstName).HasMaxLength(100);
-                e.Property(x => x.LastName).HasMaxLength(100);
-                e.Property(x => x.PhoneNumber).HasMaxLength(20);
-            });
-            
-            // 2. Book
-            modelBuilder.Entity<Book>(e =>
-            {
-                e.HasKey(x => x.Id);
-                e.HasIndex(x => x.Isbn);
-                e.Property(x => x.Title).HasMaxLength(500).IsRequired();
-                e.Property(x => x.Author).HasMaxLength(300).IsRequired();
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Email).IsUnique();
+            e.Property(x => x.Email).HasMaxLength(256).IsRequired();
+            e.Property(x => x.DisplayName).HasMaxLength(100);
+            e.Property(x => x.FirstName).HasMaxLength(100);
+            e.Property(x => x.LastName).HasMaxLength(100);
+            e.Property(x => x.PhoneNumber).HasMaxLength(20);
+            e.Property(x => x.PublicUsername).HasMaxLength(100);
+            e.Property(x => x.Bio).HasMaxLength(500);
+            e.Property(x => x.PrivacySetting).HasMaxLength(20);
+        });
 
-                e.HasOne(x => x.Series)
-                 .WithMany(s => s.Books)
-                 .HasForeignKey(x => x.SeriesId)
-                 .OnDelete(DeleteBehavior.SetNull);
-            });
+        // 2. Book
+        modelBuilder.Entity<Book>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Isbn);
+            e.Property(x => x.Title).HasMaxLength(500).IsRequired();
+            e.Property(x => x.Author).HasMaxLength(300).IsRequired();
 
-            // 3. UserBook
-            modelBuilder.Entity<UserBook>(e =>
-            {
-                e.HasKey(x => x.Id);
-                e.HasIndex(x => new { x.UserId, x.Status });
-                e.HasIndex(x => new { x.UserId, x.BookId }).IsUnique();
+            e.HasOne(x => x.Series)
+             .WithMany(s => s.Books)
+             .HasForeignKey(x => x.SeriesId)
+             .OnDelete(DeleteBehavior.SetNull);
+        });
 
-                e.HasOne(x => x.User)
-                 .WithMany()
-                 .HasForeignKey(x => x.UserId)
-                 .OnDelete(DeleteBehavior.Cascade);
+        // 3. UserBook  (IMPORTANT FIX HERE)
+        modelBuilder.Entity<UserBook>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.Status });
+            e.HasIndex(x => new { x.UserId, x.BookId }).IsUnique();
 
-                e.HasOne(x => x.Book)
-                 .WithMany()
-                 .HasForeignKey(x => x.BookId)
-                 .OnDelete(DeleteBehavior.Cascade);
-            });
+            e.HasOne(x => x.User)
+             .WithMany(u => u.UserBooks)          // ← This is the critical fix
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
 
-            // 4. Friendship
-            modelBuilder.Entity<Friendship>(e =>
-            {
-                e.HasKey(x => x.Id);
+            e.HasOne(x => x.Book)
+             .WithMany()
+             .HasForeignKey(x => x.BookId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
 
-                e.HasOne(x => x.Requester)
-                 .WithMany()
-                 .HasForeignKey(x => x.RequesterId)
-                 .OnDelete(DeleteBehavior.Restrict);
+        // 4. Friendship
+        modelBuilder.Entity<Friendship>(e =>
+        {
+            e.HasKey(x => x.Id);
 
-                e.HasOne(x => x.Receiver)
-                 .WithMany()
-                 .HasForeignKey(x => x.ReceiverId)
-                 .OnDelete(DeleteBehavior.Restrict);
-            });
+            e.HasOne(x => x.Requester)
+             .WithMany()
+             .HasForeignKey(x => x.RequesterId)
+             .OnDelete(DeleteBehavior.Restrict);
 
-            // 5. Review
-            modelBuilder.Entity<Review>(e =>
-            {
-                e.HasKey(x => x.Id);
-                e.HasIndex(x => x.BookId);
-                e.Property(x => x.Rating).IsRequired();
-                e.Property(x => x.ReviewText).HasMaxLength(2000);
-            });
+            e.HasOne(x => x.Receiver)
+             .WithMany()
+             .HasForeignKey(x => x.ReceiverId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
 
-            // 6. Tags (Using explicit UserBookTag join entity)
-            modelBuilder.Entity<Tag>(e =>
-            {
-                e.HasKey(x => x.Id);
-                e.HasIndex(x => new { x.UserId, x.Name }).IsUnique();
-            });
+        // 5. Review
+        modelBuilder.Entity<Review>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.BookId);
+            e.Property(x => x.Rating).IsRequired();
+            e.Property(x => x.ReviewText).HasMaxLength(2000);
+        });
 
-            modelBuilder.Entity<UserBookTag>(e =>
-            {
-                e.HasKey(ubt => new { ubt.UserBookId, ubt.TagId });
+        // 6. Tags
+        modelBuilder.Entity<Tag>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.Name }).IsUnique();
+        });
 
-                e.HasOne(ubt => ubt.UserBook)
-                 .WithMany(ub => ub.Tags)
-                 .HasForeignKey(ubt => ubt.UserBookId)
-                 .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<UserBookTag>(e =>
+        {
+            e.HasKey(ubt => new { ubt.UserBookId, ubt.TagId });
 
-                e.HasOne(ubt => ubt.Tag)
-                 .WithMany(t => t.UserBookTags)
-                 .HasForeignKey(ubt => ubt.TagId)
-                 .OnDelete(DeleteBehavior.Cascade);
-            });
+            e.HasOne(ubt => ubt.UserBook)
+             .WithMany(ub => ub.Tags)
+             .HasForeignKey(ubt => ubt.UserBookId)
+             .OnDelete(DeleteBehavior.Cascade);
 
-            // 7. Reading Session
-            modelBuilder.Entity<ReadingSession>(e =>
-            {
-                e.HasKey(x => x.Id);
-                e.HasIndex(x => x.UserBookId);
-                
-                e.HasOne(x => x.UserBook)
-                 .WithMany(ub => ub.ReadingSessions)
-                 .HasForeignKey(x => x.UserBookId)
-                 .OnDelete(DeleteBehavior.Cascade);
-            });
+            e.HasOne(ubt => ubt.Tag)
+             .WithMany(t => t.UserBookTags)
+             .HasForeignKey(ubt => ubt.TagId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
 
-            // 8. Password Reset Token
-            modelBuilder.Entity<PasswordResetToken>(e =>
-            {
-                e.HasKey(x => x.Id);
-                e.HasIndex(x => x.TokenHash).IsUnique();
-                e.HasOne(x => x.User)
-                 .WithMany()
-                 .HasForeignKey(x => x.UserId)
-                 .OnDelete(DeleteBehavior.Cascade);
-            });
+        // 7. Reading Session
+        modelBuilder.Entity<ReadingSession>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.UserBookId);
 
-            // 9. Quotes
-            modelBuilder.Entity<Quote>(e =>
-            {
-                e.HasKey(x => x.Id);
-                e.HasIndex(x => new { x.UserId, x.BookId });
-                e.Property(x => x.Text).IsRequired();
-                e.Property(x => x.PageNumber).IsRequired();
-                e.Property(x => x.CreatedAt).IsRequired();
+            e.HasOne(x => x.UserBook)
+             .WithMany(ub => ub.ReadingSessions)
+             .HasForeignKey(x => x.UserBookId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
 
-                e.HasOne(x => x.User)
-                 .WithMany()
-                 .HasForeignKey(x => x.UserId)
-                 .OnDelete(DeleteBehavior.Cascade);
+        // 8. Password Reset Token
+        modelBuilder.Entity<PasswordResetToken>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.TokenHash).IsUnique();
 
-                e.HasOne(x => x.Book)
-                 .WithMany()
-                 .HasForeignKey(x => x.BookId)
-                 .OnDelete(DeleteBehavior.Cascade);
-            });
-        }
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 9. Quotes
+        modelBuilder.Entity<Quote>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.BookId });
+            e.Property(x => x.Text).IsRequired();
+            e.Property(x => x.PageNumber).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.Book)
+             .WithMany()
+             .HasForeignKey(x => x.BookId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 }
