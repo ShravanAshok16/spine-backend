@@ -500,5 +500,16 @@ public class UserBooksController : ControllerBase
         return Ok(stats);
     }
 
+    public class BatchStatusRequest { public List<Guid> UserBookIds { get; set; } = new(); public string Status { get; set; } = string.Empty; }
+
+[HttpPost("batch-status")]
+public async Task<IActionResult> BatchUpdateStatus([FromBody] BatchStatusRequest request)
+{
+    var userId = GetCurrentUserId();
+    var books = await _db.UserBooks.Where(ub => request.UserBookIds.Contains(ub.Id) && ub.UserId == userId).ToListAsync();
+    foreach (var book in books) book.Status = request.Status;
+    await _db.SaveChangesAsync();
+    return Ok(new { message = $"{books.Count} books updated." });
+}
     
 }

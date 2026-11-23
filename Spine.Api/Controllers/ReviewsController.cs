@@ -13,10 +13,28 @@ namespace Spine.Api.Controllers;
 public class ReviewsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    public ReviewsController(AppDbContext db) => _db = db;
 
-    public ReviewsController(AppDbContext db)
+    [HttpGet("book/{bookId:guid}")]
+    public async Task<IActionResult> GetBookReviews(Guid bookId)
     {
-        _db = db;
+        var reviews = await _db.Reviews
+            .AsNoTracking()
+            .Where(r => r.BookId == bookId)
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new ReviewResponse
+            {
+                Id = r.Id,
+                UserId = r.UserId,
+                UserDisplayName = r.User.DisplayName,
+                Rating = r.Rating,
+                ReviewText = r.ReviewText,
+                CreatedAt = r.CreatedAt
+            })
+            .ToListAsync();
+
+        var average = reviews.Any() ? Math.Round(reviews.Average(r => r.Rating), 1) : 0;
+        return Ok(new { averageRating = average, totalReviews = reviews.Count, reviews });
     }
 
     [HttpPost("book/{bookId:guid}")]
@@ -26,69 +44,35 @@ public class ReviewsController : ControllerBase
             return BadRequest(new { message = "Rating must be between 1 and 5." });
 
         var userId = GetCurrentUserId();
+        var existing = await _db.Reviews.FirstOrDefaultAsync(r => r.BookId == bookId && r.UserId == userId);
 
-        // Check if the user has already reviewed this book
-        var existingReview = await _db.Reviews
-            .FirstOrDefaultAsync(r => r.BookId == bookId && r.UserId == userId);
-
-        if (existingReview is not null)
-            return BadRequest(new { message = "You have already reviewed this book." });
-
-        // Check if the book exists
-        var bookExists = await _db.Books.AnyAsync(b => b.Id == bookId);
-        if (!bookExists) return NotFound(new { message = "Book not found." });
-
-        var review = new Review
+        if (existing != null)
         {
-            UserId = userId,
-            BookId = bookId,
-            Rating = request.Rating,
-            ReviewText = request.ReviewText,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        _db.Reviews.Add(review);
-        await _db.SaveChangesAsync();
-
-        return Ok(new { message = "Review created successfully." });
-    }
-
-    [HttpGet("book/{bookId:guid}")]
-    [AllowAnonymous] // Anyone can read reviews for a book
-    public async Task<IActionResult> GetBookReviews(Guid bookId)
-    {
-        var reviews = await _db.Reviews
-            .AsNoTracking()
-            .Include(r => r.User)
-            .Where(r => r.BookId == bookId)
-            .OrderByDescending(r => r.CreatedAt)
-            .Select(r => new
+            existing.Rating = request.Rating;
+            existing.ReviewText = request.ReviewText?.Trim();
+            existing.UpdatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            var review = new Review
             {
-                r.Id,
-                r.Rating,
-                r.ReviewText,
-                r.CreatedAt,
-                ReviewerName = r.User.DisplayName
-            })
-            .ToListAsync();
+                BookId = bookId,
+                UserId = userId,
+                Rating = request.Rating,
+                ReviewText = request.ReviewText?.Trim(),
+                CreatedAt = DateTime.UtcNow
+            };
+            _db.Reviews.Add(review);
+        }
 
-        var averageRating = reviews.Any() ? reviews.Average(r => r.Rating) : 0;
-
-        return Ok(new
-        {
-            AverageRating = Math.Round(averageRating, 1),
-            TotalReviews = reviews.Count,
-            Reviews = reviews
-        });
+        await _db.SaveChangesAsync();
+        return Ok(new { message = "Review saved." });
     }
 
     private Guid GetCurrentUserId()
     {
         var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
                ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-
-        if (string.IsNullOrEmpty(sub)) throw new UnauthorizedAccessException();
-
-        return Guid.Parse(sub);
+        return Guid.Parse(sub!);
     }
 }

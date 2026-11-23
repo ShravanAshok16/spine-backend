@@ -18,4 +18,5 @@ public class User
     public bool IsActive { get; set; } = true;
     public bool IsEmailVerified { get; set; } = false;
     public string? EmailVerificationToken { get; set; }
+    public string? Bio { get; set; }
 }

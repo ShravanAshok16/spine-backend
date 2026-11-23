@@ -151,4 +151,38 @@ public class AccountController : ControllerBase
 
         return Guid.Parse(sub);
     }
+
+    public class UpdatePrivacyRequest
+{
+    public string PrivacySetting { get; set; } = "FriendsOnly";
+    public string? Bio { get; set; }
+}
+
+[HttpPut("privacy")]
+public async Task<IActionResult> UpdatePrivacy([FromBody] UpdatePrivacyRequest request)
+{
+    var userId = GetCurrentUserId();
+    var user = await _db.Users.FindAsync(userId);
+    if (user is null) return NotFound();
+
+    var allowed = new[] { "Public", "FriendsOnly", "Private" };
+    if (!allowed.Contains(request.PrivacySetting))
+        return BadRequest(new { message = "Invalid privacy setting." });
+
+    user.PrivacySetting = request.PrivacySetting;
+    user.Bio = request.Bio?.Trim();
+    await _db.SaveChangesAsync();
+
+    return NoContent();
+}
+
+[HttpGet("privacy")]
+public async Task<IActionResult> GetPrivacy()
+{
+    var userId = GetCurrentUserId();
+    var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+    if (user is null) return NotFound();
+
+    return Ok(new { privacySetting = user.PrivacySetting ?? "FriendsOnly", bio = user.Bio });
+}
 }
