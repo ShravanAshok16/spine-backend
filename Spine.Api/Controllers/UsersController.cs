@@ -85,4 +85,73 @@ public class UsersController : ControllerBase
                ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         return Guid.Parse(sub!);
     }
+
+        [HttpGet("wrapped")]
+    public async Task<IActionResult> GetYearlyWrapped()
+    {
+        var userId = GetCurrentUserId();
+        var currentYear = DateTime.UtcNow.Year;
+
+        var books = await _db.UserBooks
+            .Include(ub => ub.Book)
+            .Where(ub => ub.UserId == userId && !ub.IsDeleted && ub.Status == "Finished")
+            .ToListAsync();
+
+        var totalBooks = books.Count;
+        var totalPages = books.Sum(b => b.Book.PageCount ?? 0);
+
+        // Calculate Top Genre & Author
+        var genres = books
+            .Where(b => !string.IsNullOrEmpty(b.Book.Genres))
+            .SelectMany(b => b.Book.Genres!.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            .Select(g => g.Trim())
+            .GroupBy(g => g)
+            .OrderByDescending(g => g.Count())
+            .Select(g => g.Key)
+            .FirstOrDefault() ?? "Unknown";
+
+        var topAuthor = books
+            .Where(b => !string.IsNullOrEmpty(b.Book.Author))
+            .GroupBy(b => b.Book.Author)
+            .OrderByDescending(g => g.Count())
+            .Select(g => g.Key)
+            .FirstOrDefault() ?? "Unknown";
+
+        var longestBook = books
+            .OrderByDescending(b => b.Book.PageCount)
+            .Select(b => new { b.Book.Title, b.Book.PageCount })
+            .FirstOrDefault();
+
+        return Ok(new
+        {
+            Year = currentYear,
+            TotalBooks = totalBooks,
+            TotalPages = totalPages,
+            TopGenre = genres,
+            TopAuthor = topAuthor,
+            LongestBook = longestBook
+        });
+    }
+
+        [HttpPut("goal")]
+    public async Task<IActionResult> UpdateReadingGoal([FromBody] UpdateGoalRequest request)
+    {
+        var userId = GetCurrentUserId();
+        var user = await _db.Users.FindAsync(userId);
+        if (user == null) return NotFound();
+
+        user.YearlyGoal = request.Goal;
+        await _db.SaveChangesAsync();
+        return Ok();
+    }
+
+    [HttpGet("goal")]
+    public async Task<IActionResult> GetReadingGoal()
+    {
+        var userId = GetCurrentUserId();
+        var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+        return Ok(new { goal = user?.YearlyGoal ?? 24 });
+    }
+
+    public class UpdateGoalRequest { public int Goal { get; set; } }
 }

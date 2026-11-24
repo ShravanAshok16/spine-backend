@@ -24,4 +24,5 @@ public class User
 
     // Navigation Properties
     public ICollection<UserBook> UserBooks { get; set; } = new List<UserBook>();
+    
 }
