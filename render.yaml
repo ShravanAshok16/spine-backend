@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: spine-api
+    env: docker
+    plan: free
+    dockerCommand: dotnet Spine.Api.dll
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ConnectionStrings__Default
+        fromDatabase:
+          name: spine-db
+          property: connectionString
+      - key: Redis__ConnectionString
+        fromService:
+          type: redis
+          name: spine-redis
+          property: connectionString
+      - key: Jwt__Key
+        generateValue: true # Render will generate a secure random 64-char string
+      - key: Jwt__Issuer
+        value: Spine
+      - key: Jwt__Audience
+        value: SpineClient
+      # Replace with your actual Vercel URL after Part 2
+      - key: AllowedOrigins__0
+        value: https://your-app.vercel.app
+
+  - type: redis
+    name: spine-redis
+    plan: free
+    ipAllowList: [] # Allow internal connections only
+    maxmemoryPolicy: allkeys-lru # Best for caching[reference:3]
+
+databases:
+  - name: spine-db
+    plan: free
+    databaseName: spine

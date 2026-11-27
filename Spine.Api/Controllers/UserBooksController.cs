@@ -296,24 +296,29 @@ public class UserBooksController : ControllerBase
 
         var previousStatus = userBook.Status;
 
-        userBook.Status = request.Status;
-        userBook.PersonalRating = request.PersonalRating;
-        userBook.PrivateNotes = request.PrivateNotes;
-        userBook.LentTo = request.LentTo;
+        // Partial updates
+        if (request.Status != null) userBook.Status = request.Status;
+        if (request.PersonalRating.HasValue) userBook.PersonalRating = request.PersonalRating.Value;
+        if (request.PrivateNotes != null) userBook.PrivateNotes = request.PrivateNotes;
+        if (request.LentTo != null) userBook.LentTo = request.LentTo;
 
-        if (!string.IsNullOrEmpty(request.Ownership) && 
-            Enum.TryParse<Spine.Core.Enums.OwnershipStatus>(request.Ownership, true, out var parsedOwnership))
+        // Safely parse Enum by removing spaces and slashes
+        if (!string.IsNullOrEmpty(request.Ownership))
         {
-            userBook.Ownership = parsedOwnership;
+            var cleanOwnership = request.Ownership.Replace(" ", "").Replace("/", "");
+            if (Enum.TryParse<Spine.Core.Enums.OwnershipStatus>(cleanOwnership, true, out var parsedOwnership))
+            {
+                userBook.Ownership = parsedOwnership;
+            }
         }
 
         if (request.Status == "Finished" && userBook.Book.PageCount.HasValue)
         {
             userBook.CurrentPage = userBook.Book.PageCount.Value;
         }
-        else
+        else if (request.CurrentPage.HasValue)
         {
-            userBook.CurrentPage = request.CurrentPage;
+            userBook.CurrentPage = request.CurrentPage.Value;
         }
 
         await _db.SaveChangesAsync();
@@ -339,17 +344,6 @@ public class UserBooksController : ControllerBase
         }
 
         return NoContent();
-    }
-
-    private Guid GetCurrentUserId()
-    {
-        var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
-               ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-
-        if (string.IsNullOrEmpty(sub))
-            throw new UnauthorizedAccessException("User identity not found in token.");
-
-        return Guid.Parse(sub);
     }
 
     [HttpDelete("{id:guid}")]
@@ -502,14 +496,25 @@ public class UserBooksController : ControllerBase
 
     public class BatchStatusRequest { public List<Guid> UserBookIds { get; set; } = new(); public string Status { get; set; } = string.Empty; }
 
-[HttpPost("batch-status")]
-public async Task<IActionResult> BatchUpdateStatus([FromBody] BatchStatusRequest request)
-{
-    var userId = GetCurrentUserId();
-    var books = await _db.UserBooks.Where(ub => request.UserBookIds.Contains(ub.Id) && ub.UserId == userId).ToListAsync();
-    foreach (var book in books) book.Status = request.Status;
-    await _db.SaveChangesAsync();
-    return Ok(new { message = $"{books.Count} books updated." });
-}
-    
+    [HttpPost("batch-status")]
+    public async Task<IActionResult> BatchUpdateStatus([FromBody] BatchStatusRequest request)
+    {
+        var userId = GetCurrentUserId();
+        var books = await _db.UserBooks.Where(ub => request.UserBookIds.Contains(ub.Id) && ub.UserId == userId).ToListAsync();
+        foreach (var book in books) book.Status = request.Status;
+        await _db.SaveChangesAsync();
+        return Ok(new { message = $"{books.Count} books updated." });
+    }
+
+    // 🔥 THIS WAS MISSING AND CAUSING THE ERROR 🔥
+    private Guid GetCurrentUserId()
+    {
+        var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
+               ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(sub))
+            throw new UnauthorizedAccessException("User identity not found in token.");
+
+        return Guid.Parse(sub);
+    }
 }
